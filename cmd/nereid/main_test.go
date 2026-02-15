@@ -281,6 +281,48 @@ func TestPlanWorksWithLLMUsesOpenAICompatibleEndpoint(t *testing.T) {
 	}
 }
 
+func TestPlanWorksWithPlannerAutoPrefersRulesEvenWhenKeySet(t *testing.T) {
+	t.Setenv("NEREID_PROMPT_PLANNER", "auto")
+	t.Setenv("NEREID_OPENAI_API_KEY", "test-key")
+	// If auto incorrectly tries LLM first, this invalid base URL would make the test fail.
+	t.Setenv("NEREID_LLM_BASE_URL", "http://127.0.0.1:1")
+
+	plans, err := planWorksWithPlanner(context.Background(), "東京都台東区の公園を表示してくだい。")
+	if err != nil {
+		t.Fatalf("planWorksWithPlanner() error = %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plan count mismatch got=%d want=1", len(plans))
+	}
+	if plans[0].baseName != "taito-parks" {
+		t.Fatalf("baseName mismatch got=%q want=%q", plans[0].baseName, "taito-parks")
+	}
+}
+
+func TestPlanWorksWithPlannerAutoUsesLLMWhenRulesFail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"works\":[{\"baseName\":\"llm-fallback\",\"spec\":{\"kind\":\"overpassql.map.v1\",\"title\":\"from llm\",\"overpass\":{\"endpoint\":\"https://overpass-api.de/api/interpreter\",\"query\":\"[out:json];node(35.6,139.7,35.7,139.8);out;\"}}}]}"}}]}`))
+	}))
+	defer server.Close()
+
+	t.Setenv("NEREID_PROMPT_PLANNER", "auto")
+	t.Setenv("NEREID_OPENAI_API_KEY", "test-key")
+	t.Setenv("NEREID_LLM_BASE_URL", server.URL)
+	t.Setenv("NEREID_LLM_MODEL", "test-model")
+
+	plans, err := planWorksWithPlanner(context.Background(), "大阪市の公園を表示してください。")
+	if err != nil {
+		t.Fatalf("planWorksWithPlanner() error = %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plan count mismatch got=%d want=1", len(plans))
+	}
+	if plans[0].baseName != "llm-fallback" {
+		t.Fatalf("baseName mismatch got=%q want=%q", plans[0].baseName, "llm-fallback")
+	}
+}
+
 func TestPlanWorkFromInstructionLineRejectsUnknownText(t *testing.T) {
 	_, err := planWorkFromInstructionLine("これは地図の指示ではないテキストです")
 	if err == nil {

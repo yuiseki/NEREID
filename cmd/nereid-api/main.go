@@ -448,20 +448,20 @@ func planWorksWithPlanner(ctx context.Context, text string, plannerKey string, a
 	case "llm":
 		return planWorksWithLLM(ctx, text, plannerKey, allowedKinds)
 	case "auto":
+		// Prefer deterministic rules when they match, and use LLM as a fallback for
+		// broader/unmatched prompts.
+		rulesPlans, rulesErr := planWorksFromInstructionText(text)
+		if rulesErr == nil {
+			return rulesPlans, nil
+		}
 		if strings.TrimSpace(plannerKey) == "" {
-			return planWorksFromInstructionText(text)
+			return nil, rulesErr
 		}
 		plans, err := planWorksWithLLM(ctx, text, plannerKey, allowedKinds)
 		if err == nil {
 			return plans, nil
 		}
-		// Fall back to rules, but if rules also fail return both errors so the user
-		// can see why LLM planning didn't work (e.g., TLS/egress issues).
-		rulesPlans, rulesErr := planWorksFromInstructionText(text)
-		if rulesErr == nil {
-			return rulesPlans, nil
-		}
-		return nil, fmt.Errorf("llm planner failed: %v; rules planner failed: %v", err, rulesErr)
+		return nil, fmt.Errorf("rules planner failed: %v; llm planner failed: %v", rulesErr, err)
 	default:
 		return nil, fmt.Errorf("unsupported NEREID_PROMPT_PLANNER=%q (use auto|llm|rules)", mode)
 	}
