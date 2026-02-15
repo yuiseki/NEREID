@@ -1,0 +1,21 @@
+{{- if and .Values.artifacts.ingress.enabled .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-artifacts
+  labels:
+    {{- include "nereid.labels" . | nindent 4 }}
+spec:
+  ingressClassName: {{ .Values.artifacts.ingress.className | default .Values.ingress.className }}
+  rules:
+    - host: {{ .Values.artifacts.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-artifacts
+                port:
+                  number: {{ .Values.artifacts.servicePort }}
+{{- end }}

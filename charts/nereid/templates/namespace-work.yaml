@@ -1,0 +1,11 @@
+{{- if .Values.workNamespace.name }}
+{{- $ns := (lookup "v1" "Namespace" "" .Values.workNamespace.name) }}
+{{- if not $ns }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ .Values.workNamespace.name | quote }}
+  labels:
+    {{ .Values.workNamespace.labelKey }}: {{ .Values.workNamespace.labelValue | quote }}
+{{- end }}
+{{- end }}

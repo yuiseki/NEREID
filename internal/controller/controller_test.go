@@ -1,0 +1,401 @@
+package controller
+
+import (
+	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+)
+
+func TestMakeJobNameStableAndBounded(t *testing.T) {
+	name := makeJobName(strings.Repeat("x", 120))
+	if len(name) > 63 {
+		t.Fatalf("job name length exceeded: %d", len(name))
+	}
+	if !strings.HasPrefix(name, "work-") {
+		t.Fatalf("job name prefix mismatch: %s", name)
+	}
+}
+
+func TestPruneArtifactsRemovesEntriesOlderThanRetention(t *testing.T) {
+	root := t.TempDir()
+	oldPath := filepath.Join(root, "old-work")
+	newPath := filepath.Join(root, "new-work")
+	if err := os.MkdirAll(oldPath, 0o755); err != nil {
+		t.Fatalf("mkdir old: %v", err)
+	}
+	if err := os.MkdirAll(newPath, 0o755); err != nil {
+		t.Fatalf("mkdir new: %v", err)
+	}
+
+	now := time.Date(2026, 2, 15, 12, 0, 0, 0, time.UTC)
+	oldTime := now.Add(-31 * 24 * time.Hour)
+	newTime := now.Add(-5 * 24 * time.Hour)
+	if err := os.Chtimes(oldPath, oldTime, oldTime); err != nil {
+		t.Fatalf("chtimes old: %v", err)
+	}
+	if err := os.Chtimes(newPath, newTime, newTime); err != nil {
+		t.Fatalf("chtimes new: %v", err)
+	}
+
+	c := &Controller{
+		cfg: Config{
+			ArtifactsHostPath: root,
+			ArtifactRetention: 30 * 24 * time.Hour,
+		},
+		logger:  slog.Default(),
+		nowFunc: func() time.Time { return now },
+	}
+
+	if err := c.pruneArtifacts(); err != nil {
+		t.Fatalf("pruneArtifacts() error = %v", err)
+	}
+
+	if _, err := os.Stat(oldPath); !os.IsNotExist(err) {
+		t.Fatalf("old path should be removed, stat err=%v", err)
+	}
+	if _, err := os.Stat(newPath); err != nil {
+		t.Fatalf("new path should remain, stat err=%v", err)
+	}
+}
+
+func TestBuildJobOverpassGeneratesMapLibreArtifactPage(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "nereid.yuiseki.net/v1alpha1",
+		"kind":       "Work",
+		"metadata": map[string]interface{}{
+			"name":      "overpass-sample",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "overpassql.map.v1",
+			"title": "sample",
+			"overpass": map[string]interface{}{
+				"endpoint": "https://overpass-api.de/api/interpreter",
+				"query":    "[out:json];node(1,2,3,4);out;",
+			},
+			"render": map[string]interface{}{
+				"viewport": map[string]interface{}{
+					"center": []interface{}{139.76, 35.68},
+					"zoom":   11.0,
+				},
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	job, err := c.buildJob(work, "work-overpass-sample", "overpassql.map.v1")
+	if err != nil {
+		t.Fatalf("buildJob() error = %v", err)
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Image; got != overpassJobImage {
+		t.Fatalf("unexpected image got=%q want=%q", got, overpassJobImage)
+	}
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	for _, needle := range []string{
+		"maplibre-gl",
+		"osmtogeojson",
+		"turf.min.js",
+		"fetch(\"./overpass.json\")",
+		"map.flyTo(",
+		"turf.center(normalized)",
+		"node-pins",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
+		}
+	}
+}
+
+func TestBuildJobStyleInlineGeneratesPreviewPage(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "style-sample",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "maplibre.style.v1",
+			"title": "style sample",
+			"style": map[string]interface{}{
+				"sourceStyle": map[string]interface{}{
+					"mode": "inline",
+					"json": `{"version":8,"sources":{"osm":{"type":"raster","tiles":["https://{a,b,c}.tile.openstreetmap.org/{z}/{x}/{y}.png"],"tileSize":256}},"layers":[{"id":"osm","type":"raster","source":"osm"}]}`,
+				},
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	job, err := c.buildJob(work, "work-style-sample", "maplibre.style.v1")
+	if err != nil {
+		t.Fatalf("buildJob() error = %v", err)
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Image; got != styleJobImage {
+		t.Fatalf("unexpected image got=%q want=%q", got, styleJobImage)
+	}
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	for _, needle := range []string{
+		"STYLE_MODE=\"inline\"",
+		"base64 -d > \"${OUT_DIR}/style.json\"",
+		"new maplibregl.Map(",
+		"style: \"./style.json\"",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
+		}
+	}
+}
+
+func TestBuildJobDuckdbGeneratesScaffoldPage(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "duckdb-sample",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "duckdb.map.v1",
+			"title": "duckdb sample",
+			"duckdb": map[string]interface{}{
+				"input": map[string]interface{}{
+					"uri": "https://example.com/sample.parquet",
+				},
+				"sql": "select 1;",
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	job, err := c.buildJob(work, "work-duckdb-sample", "duckdb.map.v1")
+	if err != nil {
+		t.Fatalf("buildJob() error = %v", err)
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Image; got != duckdbJobImage {
+		t.Fatalf("unexpected image got=%q want=%q", got, duckdbJobImage)
+	}
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	for _, needle := range []string{
+		"input_uri.txt",
+		"query.sql",
+		"NEREID duckdb.map.v1 scaffold",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
+		}
+	}
+}
+
+func TestBuildJobGDALRasterGeneratesWorkflowScript(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "gdal-sample",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "gdal.rastertile.v1",
+			"title": "gdal sample",
+			"raster": map[string]interface{}{
+				"input": map[string]interface{}{
+					"uri": "https://example.com/sample.tif",
+				},
+				"nodata": map[string]interface{}{
+					"src": "-9999",
+					"dst": "0",
+				},
+				"reprojection": map[string]interface{}{
+					"targetEPSG": "EPSG:3857",
+					"resampling": "near",
+				},
+				"tiles": map[string]interface{}{
+					"minZoom": int64(2),
+					"maxZoom": int64(9),
+				},
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	job, err := c.buildJob(work, "work-gdal-sample", "gdal.rastertile.v1")
+	if err != nil {
+		t.Fatalf("buildJob() error = %v", err)
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Image; got != gdalRasterJobImage {
+		t.Fatalf("unexpected image got=%q want=%q", got, gdalRasterJobImage)
+	}
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	for _, needle := range []string{
+		"gdalinfo /tmp/input.tif",
+		"gdal_translate -a_nodata",
+		"gdalwarp -r",
+		"gdal2tiles.py -w none",
+		"GeoTIFF inspect -> NoData -> Reproject -> Raster tiles -> Web map",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
+		}
+	}
+}
+
+func TestBuildJobLAZ3DTilesGeneratesWorkflowScript(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "laz-sample",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "laz.3dtiles.v1",
+			"title": "laz sample",
+			"pointcloud": map[string]interface{}{
+				"input": map[string]interface{}{
+					"uri": "https://example.com/sample.laz",
+				},
+				"crs": map[string]interface{}{
+					"source":          "EPSG:4326",
+					"target":          "EPSG:4978",
+					"inAxisOrdering":  "2,1",
+					"outAxisOrdering": "1,2",
+				},
+				"py3dtiles": map[string]interface{}{
+					"jobs":           4,
+					"pyprojAlwaysXY": true,
+				},
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	job, err := c.buildJob(work, "work-laz-sample", "laz.3dtiles.v1")
+	if err != nil {
+		t.Fatalf("buildJob() error = %v", err)
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Image; got != laz3DTilesJobImage {
+		t.Fatalf("unexpected image got=%q want=%q", got, laz3DTilesJobImage)
+	}
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	for _, needle := range []string{
+		"pdal info /tmp/input.laz",
+		"filters.reprojection",
+		"pdal pipeline /tmp/pdal-pipeline.json",
+		"py3dtiles convert /tmp/reprojected.laz",
+		"Cesium3DTileset.fromUrl(\"./3dtiles/tileset.json\")",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
+		}
+	}
+}
+
+func TestBuildJobUnsupportedKindReturnsError(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "unknown-kind",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "unknown.kind.v1",
+			"title": "unknown",
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	_, err := c.buildJob(work, "work-unknown-kind", "unknown.kind.v1")
+	if err == nil {
+		t.Fatal("buildJob() expected error for unsupported kind, got nil")
+	}
+	if !strings.Contains(err.Error(), "unsupported spec.kind") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestExtractViewportDefaultsAndOverrides(t *testing.T) {
+	workDefault := &unstructured.Unstructured{Object: map[string]interface{}{
+		"spec": map[string]interface{}{},
+	}}
+	lon, lat, zoom := extractViewport(workDefault)
+	if lon != 139.76 || lat != 35.68 || zoom != 11 {
+		t.Fatalf("defaults mismatch lon=%f lat=%f zoom=%f", lon, lat, zoom)
+	}
+
+	workCustom := &unstructured.Unstructured{Object: map[string]interface{}{
+		"spec": map[string]interface{}{
+			"render": map[string]interface{}{
+				"viewport": map[string]interface{}{
+					"center": []interface{}{140, "36.1"},
+					"zoom":   9,
+				},
+			},
+		},
+	}}
+	lon, lat, zoom = extractViewport(workCustom)
+	if lon != 140 || lat != 36.1 || zoom != 9 {
+		t.Fatalf("custom mismatch lon=%f lat=%f zoom=%f", lon, lat, zoom)
+	}
+}
+
+func TestExtractTileZoomRangeDefaultsAndBounds(t *testing.T) {
+	workDefault := &unstructured.Unstructured{Object: map[string]interface{}{"spec": map[string]interface{}{}}}
+	minZoom, maxZoom := extractTileZoomRange(workDefault)
+	if minZoom != 0 || maxZoom != 14 {
+		t.Fatalf("defaults mismatch min=%d max=%d", minZoom, maxZoom)
+	}
+
+	workCustom := &unstructured.Unstructured{Object: map[string]interface{}{
+		"spec": map[string]interface{}{
+			"raster": map[string]interface{}{
+				"tiles": map[string]interface{}{
+					"minZoom": -5,
+					"maxZoom": 99,
+				},
+			},
+		},
+	}}
+	minZoom, maxZoom = extractTileZoomRange(workCustom)
+	if minZoom != 0 || maxZoom != 24 {
+		t.Fatalf("bounds mismatch min=%d max=%d", minZoom, maxZoom)
+	}
+}

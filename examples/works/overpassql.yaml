@@ -1,0 +1,35 @@
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Work
+metadata:
+  name: overpass-parks-tokyo
+spec:
+  kind: overpassql.map.v1
+  title: "Overpass parks in Tokyo"
+  overpass:
+    endpoint: "https://overpass-api.de/api/interpreter"
+    query: |
+      [out:json][timeout:60];
+      (
+        way["leisure"="park"](35.55,139.60,35.80,139.90);
+        relation["leisure"="park"](35.55,139.60,35.80,139.90);
+      );
+      out body;
+      >;
+      out skel qt;
+  render:
+    viewport:
+      center: [139.76, 35.68]
+      zoom: 11
+    baseStyle:
+      type: raster
+      tiles:
+        - "https://{a,b,c}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      tileSize: 256
+  constraints:
+    deadlineSeconds: 600
+    egress:
+      mode: allowlist
+      allowlist:
+        - "overpass-api.de"
+  artifacts:
+    layout: map

@@ -1,0 +1,81 @@
+host: nereid.yuiseki.net
+
+ingress:
+  enabled: true
+  className: nginx
+
+artifacts:
+  hostPath: /var/lib/nereid/artifacts
+  servicePort: 8080
+  enableDirectoryListing: true
+  # If true, also expose /static/artifacts on the main host ingress.
+  exposeOnMainHost: false
+  # Public base URL used by UI links and (by default) Work.status.artifactUrl.
+  publicBaseUrl: "http://nereid-artifacts.yuiseki.com"
+  ingress:
+    enabled: true
+    className: nginx
+    host: nereid-artifacts.yuiseki.com
+
+images:
+  ui: nginxinc/nginx-unprivileged:stable-alpine
+  artifacts: nginxinc/nginx-unprivileged:stable-alpine
+  api: hashicorp/http-echo:0.2.3
+  controller: ghcr.io/yuiseki/nereid-controller:latest
+
+api:
+  text: "nereid api ok"
+
+controller:
+  enabled: false
+  # Empty means use Helm release namespace.
+  workNamespace: ""
+  # If empty, artifacts.publicBaseUrl is used.
+  artifactBaseUrl: ""
+  artifactRetention: 720h
+  resyncInterval: 5s
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+workNamespace:
+  name: nereid-work
+  labelKey: nereid.yuiseki.net/enforce
+  labelValue: enabled
+
+kueue:
+  enabled: true
+  createFlavor: true
+  clusterQueueName: nereid-cq
+  localQueueName: nereid-localq
+  flavorName: default
+  nominalQuota:
+    cpu: "32"
+    memory: "96Gi"
+
+kyvernoPolicies:
+  enabled: true
+  requireGvisor: true
+  requireRequestsLimits: true
+  runtimeClassName: gvisor
+  policyNamePrefix: nereid
+
+examples:
+  enabled: true
+  legacyJob:
+    enabled: false
+  overpassWorkName: overpass-parks-tokyo
+  overpassEndpoint: "https://overpass-api.de/api/interpreter"
+  overpassQuery: |
+    [out:json][timeout:60];
+    (
+      way["leisure"="park"](35.55,139.60,35.80,139.90);
+      relation["leisure"="park"](35.55,139.60,35.80,139.90);
+    );
+    out body;
+    >;
+    out skel qt;

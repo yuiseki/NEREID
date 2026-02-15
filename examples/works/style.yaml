@@ -1,0 +1,36 @@
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Work
+metadata:
+  name: style-custom
+spec:
+  kind: maplibre.style.v1
+  title: "Style preview"
+  style:
+    sourceStyle:
+      mode: inline
+      json: |
+        {
+          "version": 8,
+          "sources": {
+            "osm": {
+              "type": "raster",
+              "tiles": ["https://{a,b,c}.tile.openstreetmap.org/{z}/{x}/{y}.png"],
+              "tileSize": 256
+            }
+          },
+          "layers": [
+            { "id": "osm", "type": "raster", "source": "osm" }
+          ]
+        }
+    validate: true
+  render:
+    viewport:
+      center: [139.76, 35.68]
+      zoom: 10
+  constraints:
+    deadlineSeconds: 120
+    egress:
+      mode: deny
+      allowlist: []
+  artifacts:
+    layout: style

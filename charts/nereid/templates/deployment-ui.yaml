@@ -1,0 +1,32 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-ui
+  labels:
+    {{- include "nereid.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-ui
+  template:
+    metadata:
+      annotations:
+        checksum/config-ui: {{ include (print $.Template.BasePath "/configmap-ui.yaml") . | sha256sum }}
+      labels:
+        app: {{ .Release.Name }}-ui
+        {{- include "nereid.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: ui
+          image: {{ .Values.images.ui }}
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: html
+              mountPath: /usr/share/nginx/html/index.html
+              subPath: index.html
+      volumes:
+        - name: html
+          configMap:
+            name: {{ .Release.Name }}-ui

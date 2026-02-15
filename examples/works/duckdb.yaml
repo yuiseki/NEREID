@@ -1,0 +1,43 @@
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Work
+metadata:
+  name: duckdb-aggregate-sample
+spec:
+  kind: duckdb.map.v1
+  title: "DuckDB query result on map"
+  duckdb:
+    input:
+      uri: "https://example.com/sample.parquet"
+      format: parquet
+    sql: |
+      -- 返す列は最低限: lon, lat, 任意のproperties
+      SELECT
+        lon,
+        lat,
+        category,
+        value
+      FROM read_parquet('${INPUT0}')
+      WHERE value > 10
+      LIMIT 5000;
+    output:
+      geometry:
+        mode: lonlat
+        lonColumn: lon
+        latColumn: lat
+  render:
+    viewport:
+      center: [139.76, 35.68]
+      zoom: 10
+    baseStyle:
+      type: raster
+      tiles:
+        - "https://{a,b,c}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+      tileSize: 256
+  constraints:
+    deadlineSeconds: 900
+    egress:
+      mode: allowlist
+      allowlist:
+        - "example.com"
+  artifacts:
+    layout: map

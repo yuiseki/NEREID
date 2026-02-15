@@ -1,0 +1,13 @@
+tunnel: YOUR_TUNNEL_ID
+credentials-file: /etc/cloudflared/credentials.json
+
+ingress:
+  - hostname: nereid.yuiseki.net
+    service: http://ingress-nginx-controller.ingress-nginx.svc.cluster.local:80
+    originRequest:
+      httpHostHeader: nereid.yuiseki.net
+
+  - hostname: nereid-artifacts.yuiseki.com
+    service: http://nereid-artifacts.nereid.svc.cluster.local:8080
+
+  - service: http_status:404

@@ -1,0 +1,23 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api
+  labels:
+    {{- include "nereid.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-api
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-api
+        {{- include "nereid.labels" . | nindent 8 }}
+    spec:
+      containers:
+        - name: api
+          image: {{ .Values.images.api }}
+          args: ["-listen=:8080","-text={{ .Values.api.text }}"]
+          ports:
+            - containerPort: 8080

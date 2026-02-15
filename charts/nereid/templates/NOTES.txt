@@ -1,0 +1,33 @@
+NEREID scaffolding installed.
+
+If you use NodePort ingress-nginx (http:30080):
+- curl -H "Host: {{ .Values.host }}" http://127.0.0.1:30080/
+- curl -H "Host: {{ .Values.host }}" http://127.0.0.1:30080/api
+{{- if .Values.artifacts.exposeOnMainHost }}
+- curl -H "Host: {{ .Values.host }}" http://127.0.0.1:30080/static/artifacts/
+{{- end }}
+{{- if and .Values.artifacts.ingress.enabled .Values.ingress.enabled }}
+- curl -H "Host: {{ .Values.artifacts.ingress.host }}" http://127.0.0.1:30080/
+{{- end }}
+
+{{- if .Values.controller.enabled }}
+CLI flow:
+- WORK_NAME=$(nereid submit examples/works/overpassql.yaml -n {{ .Release.Namespace }} -o name | cut -d/ -f2)
+- nereid watch "$WORK_NAME" -n {{ .Release.Namespace }}
+{{- else }}
+Controller is disabled (`controller.enabled=false`).
+Enable it and set `images.controller` to your built controller image.
+{{- end }}
+
+Infra bootstrap (optional):
+- Kueue ClusterQueue: {{ .Values.kueue.clusterQueueName }}
+- Kueue LocalQueue: {{ .Values.kueue.localQueueName }} (ns={{ .Values.workNamespace.name }})
+- Kueue ResourceFlavor: {{ .Values.kueue.flavorName }}
+- Kyverno policies prefix: {{ .Values.kyvernoPolicies.policyNamePrefix }}
+- Artifact retention: {{ .Values.controller.artifactRetention }}
+- Artifact public base URL: {{ .Values.artifacts.publicBaseUrl }}
+
+Verify:
+- kubectl get clusterqueue,localqueue -A
+- kubectl get clusterpolicy | grep {{ .Values.kyvernoPolicies.policyNamePrefix }}
+- kubectl get ns {{ .Values.workNamespace.name }} --show-labels

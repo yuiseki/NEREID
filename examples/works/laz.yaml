@@ -1,0 +1,28 @@
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Work
+metadata:
+  name: laz-3dtiles
+spec:
+  kind: laz.3dtiles.v1
+  title: "LAZ workflow (metadata -> axis/CRS -> 3DTiles -> web)"
+  pointcloud:
+    input:
+      uri: "https://github.com/PDAL/data/raw/master/las/1.2-with-color.laz"
+    crs:
+      source: "EPSG:4326"
+      target: "EPSG:4978"
+      # PDAL filters.reprojection options:
+      # https://pdal.io/en/stable/stages/filters.reprojection.html
+      inAxisOrdering: "2,1"
+      outAxisOrdering: "1,2"
+    py3dtiles:
+      jobs: 2
+      pyprojAlwaysXY: true
+  render:
+    viewport:
+      center: [139.76, 35.68]
+      zoom: 8
+  constraints:
+    deadlineSeconds: 1800
+  artifacts:
+    layout: pointcloud

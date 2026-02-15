@@ -1,0 +1,44 @@
+{{- if .Values.controller.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-controller
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "nereid.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-controller
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-controller
+        {{- include "nereid.labels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-controller
+      containers:
+        - name: controller
+          image: {{ .Values.images.controller | quote }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --work-namespace={{ .Values.controller.workNamespace | default .Release.Namespace }}
+            - --job-namespace={{ .Values.workNamespace.name }}
+            - --local-queue-name={{ .Values.kueue.localQueueName }}
+            - --runtime-class-name={{ .Values.kyvernoPolicies.runtimeClassName }}
+            - --artifacts-host-path={{ .Values.artifacts.hostPath }}
+            - --artifact-base-url={{ .Values.controller.artifactBaseUrl | default .Values.artifacts.publicBaseUrl }}
+            - --artifact-retention={{ .Values.controller.artifactRetention }}
+            - --resync-interval={{ .Values.controller.resyncInterval }}
+          resources:
+            {{- toYaml .Values.controller.resources | nindent 12 }}
+          volumeMounts:
+            - name: artifacts-root
+              mountPath: {{ .Values.artifacts.hostPath | quote }}
+      volumes:
+        - name: artifacts-root
+          hostPath:
+            path: {{ .Values.artifacts.hostPath }}
+            type: Directory
+{{- end }}

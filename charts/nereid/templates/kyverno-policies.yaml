@@ -1,0 +1,69 @@
+{{- if .Values.kyvernoPolicies.enabled }}
+
+{{- $pfx := .Values.kyvernoPolicies.policyNamePrefix -}}
+{{- $nsLabelKey := .Values.workNamespace.labelKey -}}
+{{- $nsLabelVal := .Values.workNamespace.labelValue -}}
+
+{{- if .Values.kyvernoPolicies.requireGvisor }}
+{{- $name := printf "%s-require-gvisor" $pfx -}}
+{{- $exists := (lookup "kyverno.io/v1" "ClusterPolicy" "" $name) }}
+{{- if not $exists }}
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ $name | quote }}
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: require-runtimeclass-gvisor
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchLabels:
+                  {{ $nsLabelKey }}: {{ $nsLabelVal | quote }}
+      validate:
+        message: "NEREID work pods must set runtimeClassName={{ .Values.kyvernoPolicies.runtimeClassName }}"
+        pattern:
+          spec:
+            runtimeClassName: {{ .Values.kyvernoPolicies.runtimeClassName | quote }}
+{{- end }}
+{{- end }}
+
+{{- if .Values.kyvernoPolicies.requireRequestsLimits }}
+{{- $name := printf "%s-require-requests-limits" $pfx -}}
+{{- $exists := (lookup "kyverno.io/v1" "ClusterPolicy" "" $name) }}
+{{- if not $exists }}
+---
+apiVersion: kyverno.io/v1
+kind: ClusterPolicy
+metadata:
+  name: {{ $name | quote }}
+spec:
+  validationFailureAction: Enforce
+  rules:
+    - name: require-resources
+      match:
+        any:
+          - resources:
+              kinds: ["Pod"]
+              namespaceSelector:
+                matchLabels:
+                  {{ $nsLabelKey }}: {{ $nsLabelVal | quote }}
+      validate:
+        message: "NEREID work pods must set cpu/memory requests and limits"
+        pattern:
+          spec:
+            containers:
+              - resources:
+                  requests:
+                    cpu: "?*"
+                    memory: "?*"
+                  limits:
+                    cpu: "?*"
+                    memory: "?*"
+{{- end }}
+{{- end }}
+
+{{- end }}

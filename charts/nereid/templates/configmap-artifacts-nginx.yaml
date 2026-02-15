@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-artifacts-nginx
+  labels:
+    {{- include "nereid.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    server {
+      listen 8080;
+      server_name _;
+      root /usr/share/nginx/html;
+
+      location = /static/artifacts {
+        return 301 /;
+      }
+
+      location /static/artifacts/ {
+        rewrite ^/static/artifacts/?(.*)$ /$1 break;
+        autoindex {{ ternary "on" "off" .Values.artifacts.enableDirectoryListing }};
+        autoindex_localtime on;
+        autoindex_exact_size off;
+        try_files $uri $uri/ =404;
+      }
+
+      location / {
+        autoindex {{ ternary "on" "off" .Values.artifacts.enableDirectoryListing }};
+        autoindex_localtime on;
+        autoindex_exact_size off;
+        try_files $uri $uri/ =404;
+      }
+    }

@@ -1,0 +1,252 @@
+{{- if and .Values.examples.enabled .Values.examples.legacyJob.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ printf "work-%s" .Values.examples.overpassWorkName | quote }}
+  namespace: {{ .Values.workNamespace.name | quote }}
+  labels:
+    kueue.x-k8s.io/queue-name: {{ .Values.kueue.localQueueName | quote }}
+    nereid.yuiseki.net/work: {{ .Values.examples.overpassWorkName | quote }}
+spec:
+  suspend: true
+  backoffLimit: 0
+  activeDeadlineSeconds: 600
+  template:
+    metadata:
+      labels:
+        nereid.yuiseki.net/work: {{ .Values.examples.overpassWorkName | quote }}
+    spec:
+      runtimeClassName: {{ .Values.kyvernoPolicies.runtimeClassName | quote }}
+      restartPolicy: Never
+      containers:
+        - name: task
+          image: curlimages/curl:8.5.0
+          command: ["sh","-lc"]
+          args:
+            - |
+              set -euo pipefail
+              WORK="{{ .Values.examples.overpassWorkName }}"
+              OUT_DIR="/artifacts/${WORK}"
+              mkdir -p "${OUT_DIR}"
+
+              ENDPOINT={{ .Values.examples.overpassEndpoint | quote }}
+              QUERY_B64={{ .Values.examples.overpassQuery | b64enc | quote }}
+
+              # Decode query payload from base64 to avoid YAML/heredoc indentation pitfalls.
+              printf '%s' "${QUERY_B64}" | base64 -d > /tmp/overpass.ql
+
+              echo "fetching overpass..."
+              curl -sS -X POST --data-urlencode data@/tmp/overpass.ql "${ENDPOINT}" > "${OUT_DIR}/overpass.json"
+
+              cat > "${OUT_DIR}/index.html" <<'HTML'
+              <!doctype html>
+              <html>
+                <head>
+                  <meta charset="utf-8"/>
+                  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+                  <title>NEREID artifact</title>
+                  <link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+                  <style>
+                    html, body { margin: 0; height: 100%; font-family: sans-serif; }
+                    #map { position: absolute; inset: 0; }
+                    #panel {
+                      position: absolute; z-index: 1; top: 12px; left: 12px;
+                      background: rgba(255,255,255,0.92); padding: 8px 10px; border-radius: 6px;
+                      font-size: 12px; max-width: min(320px, calc(100vw - 40px));
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div id="panel">
+                    <strong>NEREID artifact</strong><br/>
+                    Overpass JSON -> GeoJSON -> MapLibre<br/>
+                    <a href="./overpass.json">overpass.json</a>
+                    <div id="stats"></div>
+                  </div>
+                  <div id="map"></div>
+
+                  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+                  <script src="https://unpkg.com/osmtogeojson@3.0.0-beta.5/osmtogeojson.js"></script>
+                  <script src="https://unpkg.com/@turf/turf@7.2.0/turf.min.js"></script>
+                  <script>
+                    function inferOsmType(feature) {
+                      const p = feature.properties || {};
+                      if (typeof p.type === "string" && p.type) return p.type;
+                      if (typeof p["@id"] === "string" && p["@id"].includes("/")) return p["@id"].split("/")[0];
+                      if (typeof feature.id === "string" && feature.id.includes("/")) return feature.id.split("/")[0];
+                      return "";
+                    }
+
+                    function isClosedRing(line) {
+                      if (!Array.isArray(line) || line.length < 4) return false;
+                      const a = line[0];
+                      const b = line[line.length - 1];
+                      return Array.isArray(a) && Array.isArray(b) && a[0] === b[0] && a[1] === b[1];
+                    }
+
+                    function normalizeGeoJSON(input) {
+                      const out = [];
+                      for (const f of input.features || []) {
+                        if (!f || !f.geometry) continue;
+                        const osmType = inferOsmType(f);
+                        const props = Object.assign({}, f.properties || {}, { __osm_type: osmType });
+                        const g = f.geometry;
+
+                        if (osmType === "way" && g.type === "LineString" && isClosedRing(g.coordinates || [])) {
+                          out.push({
+                            type: "Feature",
+                            properties: props,
+                            geometry: { type: "Polygon", coordinates: [g.coordinates] }
+                          });
+                          continue;
+                        }
+
+                        out.push({ type: "Feature", properties: props, geometry: g });
+                      }
+                      return { type: "FeatureCollection", features: out };
+                    }
+
+                    function buildPinImage(size) {
+                      const canvas = document.createElement("canvas");
+                      canvas.width = size;
+                      canvas.height = size;
+                      const ctx = canvas.getContext("2d");
+                      const cx = size / 2;
+                      const topY = size * 0.18;
+                      const bottomY = size - 2;
+                      const rx = size * 0.22;
+
+                      ctx.fillStyle = "#e53935";
+                      ctx.strokeStyle = "#ffffff";
+                      ctx.lineWidth = 2;
+                      ctx.beginPath();
+                      ctx.moveTo(cx, bottomY);
+                      ctx.bezierCurveTo(cx + rx * 1.4, size * 0.68, cx + rx * 1.35, size * 0.4, cx, topY);
+                      ctx.bezierCurveTo(cx - rx * 1.35, size * 0.4, cx - rx * 1.4, size * 0.68, cx, bottomY);
+                      ctx.closePath();
+                      ctx.fill();
+                      ctx.stroke();
+
+                      ctx.fillStyle = "#ffffff";
+                      ctx.beginPath();
+                      ctx.arc(cx, size * 0.38, rx * 0.45, 0, Math.PI * 2);
+                      ctx.fill();
+
+                      return ctx.getImageData(0, 0, size, size);
+                    }
+
+                    (async function main() {
+                      const map = new maplibregl.Map({
+                        container: "map",
+                        style: {
+                          version: 8,
+                          sources: {
+                            osm: {
+                              type: "raster",
+                              tiles: [
+                                "https://a.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                                "https://b.tile.openstreetmap.org/{z}/{x}/{y}.png",
+                                "https://c.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                              ],
+                              tileSize: 256
+                            }
+                          },
+                          layers: [{ id: "osm", type: "raster", source: "osm" }]
+                        },
+                        center: [139.76, 35.68],
+                        zoom: 11
+                      });
+
+                      const overpass = await fetch("./overpass.json").then((r) => r.json());
+                      const normalized = normalizeGeoJSON(osmtogeojson(overpass));
+
+                      const fillFeatures = normalized.features.filter((f) => {
+                        const t = f.properties && f.properties.__osm_type;
+                        const g = f.geometry && f.geometry.type;
+                        const isArea = g === "Polygon" || g === "MultiPolygon";
+                        return (t === "relation" || t === "way") && isArea;
+                      });
+                      const nodeFeatures = normalized.features.filter((f) => {
+                        const t = f.properties && f.properties.__osm_type;
+                        const g = f.geometry && f.geometry.type;
+                        return t === "node" && g === "Point";
+                      });
+
+                      map.on("load", () => {
+                        map.addImage("node-pin", buildPinImage(40), { pixelRatio: 2 });
+
+                        map.addSource("areas", { type: "geojson", data: { type: "FeatureCollection", features: fillFeatures } });
+                        map.addSource("nodes", { type: "geojson", data: { type: "FeatureCollection", features: nodeFeatures } });
+
+                        map.addLayer({
+                          id: "area-fill",
+                          type: "fill",
+                          source: "areas",
+                          paint: { "fill-color": "#1f77b4", "fill-opacity": 0.25 }
+                        });
+                        map.addLayer({
+                          id: "area-outline",
+                          type: "line",
+                          source: "areas",
+                          paint: { "line-color": "#1f77b4", "line-width": 1.5 }
+                        });
+                        map.addLayer({
+                          id: "node-pins",
+                          type: "symbol",
+                          source: "nodes",
+                          layout: {
+                            "icon-image": "node-pin",
+                            "icon-size": 0.65,
+                            "icon-anchor": "bottom",
+                            "icon-allow-overlap": true
+                          }
+                        });
+
+                        if ((normalized.features || []).length > 0) {
+                          const bbox = turf.bbox(normalized);
+                          if (bbox.every(Number.isFinite)) {
+                            map.fitBounds([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], { padding: 24, duration: 0 });
+                          }
+
+                          const centerFeature = turf.center(normalized);
+                          const center = centerFeature && centerFeature.geometry && centerFeature.geometry.coordinates;
+                          if (Array.isArray(center) && center.length === 2 && center.every(Number.isFinite)) {
+                            map.flyTo({
+                              center: center,
+                              zoom: Math.max(map.getZoom(), 11),
+                              speed: 0.6,
+                              curve: 1.2,
+                              essential: true
+                            });
+                          }
+                        }
+
+                        document.getElementById("stats").textContent =
+                          "areas(relation+way): " + fillFeatures.length + " / nodes(pins): " + nodeFeatures.length;
+                      });
+                    })().catch((err) => {
+                      const stats = document.getElementById("stats");
+                      if (stats) stats.textContent = "render error: " + err.message;
+                    });
+                  </script>
+                </body>
+              </html>
+              HTML
+
+              echo "done"
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+          volumeMounts:
+            - name: artifacts
+              mountPath: /artifacts
+      volumes:
+        - name: artifacts
+          hostPath:
+            path: {{ .Values.artifacts.hostPath }}
+            type: Directory
+{{- end }}

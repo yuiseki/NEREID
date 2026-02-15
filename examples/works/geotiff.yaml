@@ -1,0 +1,28 @@
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Work
+metadata:
+  name: geotiff-workflow
+spec:
+  kind: gdal.rastertile.v1
+  title: "GeoTIFF workflow (inspect -> nodata -> reproject -> tiles -> web map)"
+  raster:
+    input:
+      uri: "https://download.osgeo.org/geotiff/samples/usgs/o41078a5.tif"
+    nodata:
+      # Set only when needed.
+      src: ""
+      dst: "0"
+    reprojection:
+      targetEPSG: "EPSG:3857"
+      resampling: "near"
+    tiles:
+      minZoom: 0
+      maxZoom: 12
+  render:
+    viewport:
+      center: [-97.5, 37.2]
+      zoom: 3
+  constraints:
+    deadlineSeconds: 1200
+  artifacts:
+    layout: map

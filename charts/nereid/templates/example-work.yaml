@@ -1,0 +1,23 @@
+{{- if .Values.examples.enabled }}
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Work
+metadata:
+  name: {{ .Values.examples.overpassWorkName | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  kind: "overpassql.map.v1"
+  title: "Overpass parks in Tokyo (example)"
+  overpass:
+    endpoint: "https://overpass-api.de/api/interpreter"
+    query: |
+      [out:json][timeout:60];
+      (
+        way["leisure"="park"](35.55,139.60,35.80,139.90);
+        relation["leisure"="park"](35.55,139.60,35.80,139.90);
+      );
+      out body;
+      >;
+      out skel qt;
+  constraints:
+    deadlineSeconds: 600
+{{- end }}

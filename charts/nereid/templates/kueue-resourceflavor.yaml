@@ -1,0 +1,10 @@
+{{- if and .Values.kueue.enabled .Values.kueue.createFlavor }}
+{{- $rfName := .Values.kueue.flavorName -}}
+{{- $rf := (lookup "kueue.x-k8s.io/v1beta2" "ResourceFlavor" "" $rfName) }}
+{{- if not $rf }}
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ResourceFlavor
+metadata:
+  name: {{ $rfName | quote }}
+{{- end }}
+{{- end }}

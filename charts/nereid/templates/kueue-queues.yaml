@@ -1,0 +1,40 @@
+{{- if .Values.kueue.enabled }}
+
+{{- $cqName := .Values.kueue.clusterQueueName -}}
+{{- $lqName := .Values.kueue.localQueueName -}}
+{{- $workNs := .Values.workNamespace.name -}}
+
+{{- $cq := (lookup "kueue.x-k8s.io/v1beta2" "ClusterQueue" "" $cqName) }}
+{{- if not $cq }}
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: ClusterQueue
+metadata:
+  name: {{ $cqName | quote }}
+spec:
+  # NEREIDのwork namespaceだけを対象にしたいので、namespaceSelectorを絞ります
+  namespaceSelector:
+    matchLabels:
+      {{ .Values.workNamespace.labelKey }}: {{ .Values.workNamespace.labelValue | quote }}
+  resourceGroups:
+    - coveredResources: ["cpu", "memory"]
+      flavors:
+        - name: {{ .Values.kueue.flavorName | quote }}
+          resources:
+            - name: cpu
+              nominalQuota: {{ .Values.kueue.nominalQuota.cpu | quote }}
+            - name: memory
+              nominalQuota: {{ .Values.kueue.nominalQuota.memory | quote }}
+{{- end }}
+
+{{- $lq := (lookup "kueue.x-k8s.io/v1beta2" "LocalQueue" $workNs $lqName) }}
+{{- if not $lq }}
+apiVersion: kueue.x-k8s.io/v1beta2
+kind: LocalQueue
+metadata:
+  name: {{ $lqName | quote }}
+  namespace: {{ $workNs | quote }}
+spec:
+  clusterQueue: {{ $cqName | quote }}
+{{- end }}
+
+{{- end }}

@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ui
+  labels:
+    {{- include "nereid.labels" . | nindent 4 }}
+spec:
+  selector:
+    app: {{ .Release.Name }}-ui
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
