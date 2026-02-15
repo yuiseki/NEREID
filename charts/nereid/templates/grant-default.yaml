@@ -1,0 +1,34 @@
+{{- if .Values.grants.default.enabled }}
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Grant
+metadata:
+  name: {{ .Values.grants.default.name | quote }}
+  namespace: {{ .Release.Namespace | quote }}
+  labels:
+    {{- include "nereid.labels" . | nindent 4 }}
+spec:
+  enabled: true
+  allowedKinds:
+    - overpassql.map.v1
+    - maplibre.style.v1
+    - duckdb.map.v1
+    - gdal.rastertile.v1
+    - laz.3dtiles.v1
+  kueue:
+    localQueueName: {{ .Values.kueue.localQueueName | quote }}
+  runtimeClassName: {{ .Values.kyvernoPolicies.runtimeClassName | quote }}
+  resources:
+    requests:
+      cpu: {{ .Values.controller.resources.requests.cpu | quote }}
+      memory: {{ .Values.controller.resources.requests.memory | quote }}
+    limits:
+      cpu: {{ .Values.controller.resources.limits.cpu | quote }}
+      memory: {{ .Values.controller.resources.limits.memory | quote }}
+  env:
+    - name: OPENAI_API_KEY
+      secretKeyRef:
+        name: {{ .Values.grants.default.openaiSecretName | quote }}
+        key: {{ .Values.grants.default.openaiSecretKey | quote }}
+        optional: {{ .Values.grants.default.openaiSecretOptional }}
+{{- end }}
+

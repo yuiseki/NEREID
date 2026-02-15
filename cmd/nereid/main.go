@@ -333,7 +333,13 @@ func planWorksWithPlanner(ctx context.Context, text string) ([]instructionWorkPl
 		if err == nil {
 			return plans, nil
 		}
-		return planWorksFromInstructionText(text)
+		// Fall back to rules, but if rules also fail return both errors so the user
+		// can see why LLM planning didn't work (e.g., TLS/egress issues).
+		rulesPlans, rulesErr := planWorksFromInstructionText(text)
+		if rulesErr == nil {
+			return rulesPlans, nil
+		}
+		return nil, fmt.Errorf("llm planner failed: %v; rules planner failed: %v", err, rulesErr)
 	default:
 		return nil, fmt.Errorf("unsupported NEREID_PROMPT_PLANNER=%q (use auto|llm|rules)", mode)
 	}

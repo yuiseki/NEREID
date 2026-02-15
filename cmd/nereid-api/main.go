@@ -19,6 +19,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/util/homedir"
@@ -30,8 +31,15 @@ var workGVR = schema.GroupVersionResource{
 	Resource: "works",
 }
 
+var grantGVR = schema.GroupVersionResource{
+	Group:    "nereid.yuiseki.net",
+	Version:  "v1alpha1",
+	Resource: "grants",
+}
+
 type server struct {
 	dynamic         dynamic.Interface
+	kube            kubernetes.Interface
 	workNamespace   string
 	artifactBaseURL string
 	defaultGrant    string
@@ -60,9 +68,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, fmt.Errorf("create dynamic client: %w", err))
 		os.Exit(1)
 	}
+	kc, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, fmt.Errorf("create typed client: %w", err))
+		os.Exit(1)
+	}
 
 	s := &server{
 		dynamic:         dc,
+		kube:            kc,
 		workNamespace:   workNamespace,
 		artifactBaseURL: artifactBaseURL,
 		defaultGrant:    defaultGrant,
@@ -106,6 +120,7 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Prompt    string `json:"prompt"`
 		Namespace string `json:"namespace"`
+		Grant     string `json:"grant"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid JSON body"})
@@ -122,9 +137,33 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		ns = strings.TrimSpace(req.Namespace)
 	}
 
-	plans, err := planWorksWithPlanner(r.Context(), req.Prompt)
+	grantName := strings.TrimSpace(req.Grant)
+	if grantName == "" {
+		grantName = s.defaultGrant
+	}
+	grantName = strings.TrimSpace(grantName)
+
+	plannerKey := plannerAPIKey()
+	allowedKinds := []string(nil)
+	if grantName != "" {
+		keyFromGrant, kinds, resolveErr := s.resolvePlannerFromGrant(r.Context(), ns, grantName, plannerKey == "")
+		if resolveErr != nil {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": resolveErr.Error()})
+			return
+		}
+		allowedKinds = kinds
+		if plannerKey == "" {
+			plannerKey = keyFromGrant
+		}
+	}
+
+	plans, err := planWorksWithPlanner(r.Context(), req.Prompt, plannerKey, allowedKinds)
 	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+		msg := err.Error()
+		if strings.TrimSpace(plannerKey) == "" && strings.ToLower(strings.TrimSpace(os.Getenv("NEREID_PROMPT_PLANNER"))) != "rules" {
+			msg = msg + " (hint: configure OpenAI API key via the default Grant secretKeyRef, or set NEREID_OPENAI_API_KEY for nereid-api)"
+		}
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": msg})
 		return
 	}
 	if len(plans) == 0 {
@@ -138,8 +177,8 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	for i, p := range plans {
 		workName := buildTimestampedName(p.baseName, now.Add(time.Duration(i)*time.Second))
 
-		if s.defaultGrant != "" {
-			p.spec["grantRef"] = map[string]interface{}{"name": s.defaultGrant}
+		if grantName != "" {
+			p.spec["grantRef"] = map[string]interface{}{"name": grantName}
 		}
 
 		obj := &unstructured.Unstructured{
@@ -176,6 +215,102 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		"workNames":    workNames,
 		"artifactUrls": artifactURLs,
 	})
+}
+
+func (s *server) resolvePlannerFromGrant(ctx context.Context, namespace, grantName string, wantKey bool) (string, []string, error) {
+	grant, err := s.dynamic.Resource(grantGVR).Namespace(namespace).Get(ctx, grantName, metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return "", nil, fmt.Errorf("grant %q not found", grantName)
+		}
+		return "", nil, fmt.Errorf("get grant %q: %w", grantName, err)
+	}
+
+	allowedKinds, _, err := unstructured.NestedStringSlice(grant.Object, "spec", "allowedKinds")
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to read grant %q spec.allowedKinds: %v", grantName, err)
+	}
+
+	if !wantKey {
+		return "", allowedKinds, nil
+	}
+
+	// Prefer NEREID_OPENAI_API_KEY in grant, fall back to OPENAI_API_KEY.
+	key, err := s.grantEnvValue(ctx, namespace, grant, "NEREID_OPENAI_API_KEY")
+	if err != nil {
+		return "", nil, err
+	}
+	if key == "" {
+		key, err = s.grantEnvValue(ctx, namespace, grant, "OPENAI_API_KEY")
+		if err != nil {
+			return "", nil, err
+		}
+	}
+	return key, allowedKinds, nil
+}
+
+func (s *server) grantEnvValue(ctx context.Context, namespace string, grant *unstructured.Unstructured, name string) (string, error) {
+	raw, found, err := unstructured.NestedSlice(grant.Object, "spec", "env")
+	if err != nil {
+		return "", fmt.Errorf("failed to read grant %q spec.env: %v", grant.GetName(), err)
+	}
+	if !found || len(raw) == 0 {
+		return "", nil
+	}
+
+	for i, item := range raw {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			return "", fmt.Errorf("grant %q spec.env[%d] must be an object", grant.GetName(), i)
+		}
+		n, _ := m["name"].(string)
+		if strings.TrimSpace(n) != name {
+			continue
+		}
+
+		if v, ok := m["value"].(string); ok && strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v), nil
+		}
+
+		skr, ok := m["secretKeyRef"].(map[string]interface{})
+		if !ok {
+			return "", nil
+		}
+
+		secName, _ := skr["name"].(string)
+		secKey, _ := skr["key"].(string)
+		secName = strings.TrimSpace(secName)
+		secKey = strings.TrimSpace(secKey)
+		if secName == "" || secKey == "" {
+			return "", fmt.Errorf("grant %q spec.env[%d].secretKeyRef.name and key are required", grant.GetName(), i)
+		}
+		optional, _ := skr["optional"].(bool)
+
+		sec, err := s.kube.CoreV1().Secrets(namespace).Get(ctx, secName, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) && optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("get secret %s/%s for grant %q env %q: %v", namespace, secName, grant.GetName(), name, err)
+		}
+
+		if sec.Data == nil {
+			if optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("secret %s/%s has no data (grant %q env %q)", namespace, secName, grant.GetName(), name)
+		}
+		b, ok := sec.Data[secKey]
+		if !ok {
+			if optional {
+				return "", nil
+			}
+			return "", fmt.Errorf("secret %s/%s missing key %q (grant %q env %q)", namespace, secName, secKey, grant.GetName(), name)
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+
+	return "", nil
 }
 
 func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -301,7 +436,7 @@ func sanitizeName(v string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-func planWorksWithPlanner(ctx context.Context, text string) ([]instructionWorkPlan, error) {
+func planWorksWithPlanner(ctx context.Context, text string, plannerKey string, allowedKinds []string) ([]instructionWorkPlan, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("NEREID_PROMPT_PLANNER")))
 	if mode == "" {
 		mode = "auto"
@@ -311,16 +446,22 @@ func planWorksWithPlanner(ctx context.Context, text string) ([]instructionWorkPl
 	case "rules", "rule":
 		return planWorksFromInstructionText(text)
 	case "llm":
-		return planWorksWithLLM(ctx, text)
+		return planWorksWithLLM(ctx, text, plannerKey, allowedKinds)
 	case "auto":
-		if plannerAPIKey() == "" {
+		if strings.TrimSpace(plannerKey) == "" {
 			return planWorksFromInstructionText(text)
 		}
-		plans, err := planWorksWithLLM(ctx, text)
+		plans, err := planWorksWithLLM(ctx, text, plannerKey, allowedKinds)
 		if err == nil {
 			return plans, nil
 		}
-		return planWorksFromInstructionText(text)
+		// Fall back to rules, but if rules also fail return both errors so the user
+		// can see why LLM planning didn't work (e.g., TLS/egress issues).
+		rulesPlans, rulesErr := planWorksFromInstructionText(text)
+		if rulesErr == nil {
+			return rulesPlans, nil
+		}
+		return nil, fmt.Errorf("llm planner failed: %v; rules planner failed: %v", err, rulesErr)
 	default:
 		return nil, fmt.Errorf("unsupported NEREID_PROMPT_PLANNER=%q (use auto|llm|rules)", mode)
 	}
@@ -385,16 +526,41 @@ func plannerModel() string {
 	return model
 }
 
-func plannerSystemPrompt() string {
+func plannerSystemPrompt(allowedKinds []string) string {
+	kindsLine := "Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1."
+	if len(allowedKinds) > 0 {
+		kindsLine = "You MUST restrict spec.kind to: " + strings.Join(allowedKinds, ", ") + "."
+	}
+
 	return `You are NEREID Prompt Planner.
-Convert the user's mapping instructions into executable NEREID Work specs.
-Output MUST be JSON only:
-{"works":[{"baseName":"short-kebab-case","spec":{...}}]}
-Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1.`
+Convert the user's instructions into executable NEREID Work specs.
+
+Output MUST be JSON only (no markdown), with this schema:
+{
+  "works": [
+    {
+      "baseName": "short-kebab-case",
+      "spec": { ... Work.spec object ... }
+    }
+  ]
 }
 
-func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, error) {
-	key := plannerAPIKey()
+Rules:
+- If the user requests multiple items (bullets/newlines), split into multiple works.
+- For most "show X on a map" requests, use kind=overpassql.map.v1 and write a valid Overpass QL query.
+- Set spec.title to a human-readable English title.
+- For overpassql.map.v1, include:
+  spec.overpass.endpoint (prefer https://overpass.yuiseki.net/api/interpreter when available; otherwise https://overpass-api.de/api/interpreter)
+  spec.overpass.query (valid Overpass QL)
+  spec.render.viewport.center [lon,lat] and zoom when you can infer it.
+- For maplibre.style.v1, include spec.style.sourceStyle.mode and (json or url).
+- Return only valid JSON.
+
+` + kindsLine
+}
+
+func planWorksWithLLM(ctx context.Context, text string, plannerKey string, allowedKinds []string) ([]instructionWorkPlan, error) {
+	key := strings.TrimSpace(plannerKey)
 	if key == "" {
 		return nil, errors.New("llm planner requires NEREID_OPENAI_API_KEY or OPENAI_API_KEY")
 	}
@@ -402,7 +568,7 @@ func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, 
 	reqBody := map[string]interface{}{
 		"model": plannerModel(),
 		"messages": []map[string]string{
-			{"role": "system", "content": plannerSystemPrompt()},
+			{"role": "system", "content": plannerSystemPrompt(allowedKinds)},
 			{"role": "user", "content": text},
 		},
 		"temperature":     0.1,

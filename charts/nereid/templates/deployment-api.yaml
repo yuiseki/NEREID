@@ -21,6 +21,9 @@ spec:
           image: {{ .Values.images.api }}
           command: ["/nereid-api"]
           env:
+            # Ensure HTTPS requests (OpenAI, etc.) can validate server certificates.
+            - name: SSL_CERT_FILE
+              value: /etc/ssl/certs/ca-certificates.crt
             - name: NEREID_API_BIND
               value: ":8080"
             - name: NEREID_WORK_NAMESPACE
@@ -47,8 +50,15 @@ spec:
             - name: api-binary
               mountPath: /nereid-api
               readOnly: true
+            - name: ca-certificates
+              mountPath: /etc/ssl/certs/ca-certificates.crt
+              readOnly: true
       volumes:
         - name: api-binary
           hostPath:
             path: {{ .Values.api.binaryHostPath }}
+            type: File
+        - name: ca-certificates
+          hostPath:
+            path: /etc/ssl/certs/ca-certificates.crt
             type: File

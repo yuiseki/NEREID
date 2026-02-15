@@ -27,14 +27,23 @@ api:
   # Host path of locally built API binary mounted into the API pod.
   binaryHostPath: /home/yuiseki/src/github.com/yuiseki/NEREID/bin/nereid-api
   workNamespace: nereid
-  # Optional: if set, nereid-api injects spec.grantRef.name for all submitted works.
-  defaultGrant: ""
+  # If set, nereid-api injects spec.grantRef.name for all submitted works.
+  # This is the recommended path for SaaS-like UI: users don't choose a grant, the system applies a default one.
+  defaultGrant: "nereid-default"
   promptPlanner: auto
   llmBaseUrl: ""
   llmModel: gpt-4o-mini
   # Optional: set a plaintext key for quick MVP deployment.
   # Prefer secret management in production.
   openaiApiKey: ""
+
+grants:
+  default:
+    enabled: true
+    name: "nereid-default"
+    openaiSecretName: "nereid-openai"
+    openaiSecretKey: "api-key"
+    openaiSecretOptional: true
 
 controller:
   enabled: true
