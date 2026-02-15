@@ -2,204 +2,253 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"sigs.k8s.io/yaml"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/client-go/util/homedir"
 )
 
-var nowFunc = time.Now
+var workGVR = schema.GroupVersionResource{
+	Group:    "nereid.yuiseki.net",
+	Version:  "v1alpha1",
+	Resource: "works",
+}
+
+type server struct {
+	dynamic         dynamic.Interface
+	workNamespace   string
+	artifactBaseURL string
+	logger          *slog.Logger
+}
+
+type instructionWorkPlan struct {
+	baseName string
+	spec     map[string]interface{}
+}
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
+	addr := envOr("NEREID_API_BIND", ":8080")
+	workNamespace := envOr("NEREID_WORK_NAMESPACE", "nereid")
+	artifactBaseURL := envOr("NEREID_ARTIFACT_BASE_URL", "http://nereid-artifacts.yuiseki.com")
+	kubeconfig := os.Getenv("KUBECONFIG")
+
+	restCfg, err := buildRESTConfig(kubeconfig)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, fmt.Errorf("build kubernetes config: %w", err))
+		os.Exit(1)
+	}
+	dc, err := dynamic.NewForConfig(restCfg)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, fmt.Errorf("create dynamic client: %w", err))
+		os.Exit(1)
+	}
+
+	s := &server{
+		dynamic:         dc,
+		workNamespace:   workNamespace,
+		artifactBaseURL: artifactBaseURL,
+		logger:          slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})),
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", s.handle)
+
+	s.logger.Info("nereid-api started", "addr", addr, "workNamespace", workNamespace, "artifactBaseURL", artifactBaseURL)
+	if err := http.ListenAndServe(addr, mux); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(args []string) error {
-	if len(args) == 0 {
-		return usageError("subcommand is required")
-	}
-
-	switch args[0] {
-	case "submit":
-		return runSubmit(args[1:])
-	case "watch":
-		return runWatch(args[1:])
-	case "prompt":
-		return runPrompt(args[1:])
-	case "-h", "--help", "help":
-		fmt.Fprintln(os.Stdout, usageText())
-		return nil
+func (s *server) handle(w http.ResponseWriter, r *http.Request) {
+	switch {
+	case (r.URL.Path == "/api/submit" || r.URL.Path == "/submit") && r.Method == http.MethodPost:
+		s.handleSubmit(w, r)
+		return
+	case (strings.HasPrefix(r.URL.Path, "/api/status/") || strings.HasPrefix(r.URL.Path, "/status/")) && r.Method == http.MethodGet:
+		s.handleStatus(w, r)
+		return
+	case (r.URL.Path == "/api" || r.URL.Path == "/api/" || r.URL.Path == "/") && r.Method == http.MethodGet:
+		writeJSON(w, http.StatusOK, map[string]interface{}{
+			"ok":      true,
+			"service": "nereid-api",
+		})
+		return
 	default:
-		return usageError(fmt.Sprintf("unknown subcommand: %s", args[0]))
+		writeJSON(w, http.StatusNotFound, map[string]interface{}{
+			"error": "not found",
+			"path":  r.URL.Path,
+		})
+		return
 	}
 }
 
-func runSubmit(args []string) error {
-	if len(args) == 0 {
-		return usageError("submit requires a work spec path")
+func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Prompt    string `json:"prompt"`
+		Namespace string `json:"namespace"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid JSON body"})
+		return
+	}
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	if req.Prompt == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "prompt is required"})
+		return
 	}
 
-	body, workName, err := buildTimestampedWorkSpec(args[0], nowFunc().UTC())
+	ns := s.workNamespace
+	if strings.TrimSpace(req.Namespace) != "" {
+		ns = strings.TrimSpace(req.Namespace)
+	}
+
+	plans, err := planWorksWithPlanner(r.Context(), req.Prompt)
 	if err != nil {
-		return err
-	}
-
-	kubectlArgs := []string{"create", "-f", "-"}
-	kubectlArgs = append(kubectlArgs, args[1:]...)
-	if err := runKubectlWithInput(body, kubectlArgs...); err != nil {
-		return err
-	}
-
-	fmt.Fprintf(os.Stderr, "artifactUrl=%s\n", artifactURLForWork(workName))
-	return nil
-}
-
-func runWatch(args []string) error {
-	if len(args) == 0 {
-		return usageError("watch requires a work name")
-	}
-
-	kubectlArgs := []string{
-		"get",
-		"work",
-		args[0],
-		"-w",
-		"-o",
-		"custom-columns=NAME:.metadata.name,PHASE:.status.phase,ARTIFACT:.status.artifactUrl",
-	}
-	kubectlArgs = append(kubectlArgs, args[1:]...)
-	return runKubectl(kubectlArgs...)
-}
-
-func runPrompt(args []string) error {
-	if len(args) == 0 {
-		return usageError("prompt requires instruction text or a path to a text file")
-	}
-
-	source := args[0]
-	kubectlOpts := args[1:]
-
-	instructionText, err := readInstructionText(source)
-	if err != nil {
-		return err
-	}
-
-	plans, err := planWorksWithPlanner(context.Background(), instructionText)
-	if err != nil {
-		return err
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": err.Error()})
+		return
 	}
 	if len(plans) == 0 {
-		return fmt.Errorf("no executable instructions found")
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "no executable plans"})
+		return
 	}
 
-	baseTime := nowFunc().UTC()
-	for i, plan := range plans {
-		body, workName, buildErr := buildGeneratedWorkSpec(plan.baseName, plan.spec, baseTime.Add(time.Duration(i)*time.Second))
-		if buildErr != nil {
-			return buildErr
+	now := time.Now().UTC()
+	workNames := make([]string, 0, len(plans))
+	artifactURLs := make([]string, 0, len(plans))
+	for i, p := range plans {
+		workName := buildTimestampedName(p.baseName, now.Add(time.Duration(i)*time.Second))
+		obj := &unstructured.Unstructured{
+			Object: map[string]interface{}{
+				"apiVersion": "nereid.yuiseki.net/v1alpha1",
+				"kind":       "Work",
+				"metadata": map[string]interface{}{
+					"name": workName,
+				},
+				"spec": p.spec,
+			},
 		}
 
-		kubectlArgs := []string{"create", "-f", "-"}
-		kubectlArgs = append(kubectlArgs, kubectlOpts...)
-		if err := runKubectlWithInput(body, kubectlArgs...); err != nil {
-			return err
+		if _, createErr := s.dynamic.Resource(workGVR).Namespace(ns).Create(r.Context(), obj, metav1.CreateOptions{}); createErr != nil {
+			if apierrors.IsAlreadyExists(createErr) {
+				continue
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("create work failed: %v", createErr)})
+			return
 		}
-		fmt.Fprintf(os.Stderr, "artifactUrl=%s\n", artifactURLForWork(workName))
+
+		workNames = append(workNames, workName)
+		artifactURLs = append(artifactURLs, artifactURL(s.artifactBaseURL, workName))
 	}
 
-	return nil
-}
-
-func runKubectl(args ...string) error {
-	return runKubectlWithInput(nil, args...)
-}
-
-func runKubectlWithInput(input []byte, args ...string) error {
-	cmd := exec.Command("kubectl", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if input != nil {
-		cmd.Stdin = bytes.NewReader(input)
-	} else {
-		cmd.Stdin = os.Stdin
+	if len(workNames) == 0 {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "no work created"})
+		return
 	}
-	if err := cmd.Run(); err != nil {
-		var exitErr *exec.ExitError
-		if errors.As(err, &exitErr) {
-			return fmt.Errorf("kubectl %v failed: %w", args, err)
-		}
-		return fmt.Errorf("failed to execute kubectl %v: %w", args, err)
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"workName":     workNames[0],
+		"artifactUrl":  artifactURLs[0],
+		"workNames":    workNames,
+		"artifactUrls": artifactURLs,
+	})
+}
+
+func (s *server) handleStatus(w http.ResponseWriter, r *http.Request) {
+	workName := strings.TrimSpace(strings.TrimPrefix(strings.TrimPrefix(r.URL.Path, "/api/status/"), "/status/"))
+	if workName == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "work name is required"})
+		return
 	}
-	return nil
-}
+	ns := strings.TrimSpace(r.URL.Query().Get("namespace"))
+	if ns == "" {
+		ns = s.workNamespace
+	}
 
-func usageError(msg string) error {
-	return fmt.Errorf("%s\n\n%s", msg, usageText())
-}
-
-func usageText() string {
-	return `Usage:
-  nereid submit <work-spec.yaml> [kubectl create options...]
-  nereid watch <work-name> [kubectl get options...]
-  nereid prompt <instruction-text|instruction-file.txt> [kubectl create options...]
-
-Examples:
-  WORK_NAME=$(nereid submit examples/works/overpassql.yaml -n nereid -o name | cut -d/ -f2)
-  nereid watch "$WORK_NAME" -n nereid
-  nereid prompt examples/instructions/trident-ja.txt -n nereid --dry-run=server -o name`
-}
-
-func buildTimestampedWorkSpec(path string, now time.Time) ([]byte, string, error) {
-	data, err := os.ReadFile(path)
+	obj, err := s.dynamic.Resource(workGVR).Namespace(ns).Get(r.Context(), workName, metav1.GetOptions{})
 	if err != nil {
-		return nil, "", fmt.Errorf("read work spec %q: %w", path, err)
+		if apierrors.IsNotFound(err) {
+			writeJSON(w, http.StatusNotFound, map[string]interface{}{"error": "work not found"})
+			return
+		}
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": err.Error()})
+		return
 	}
 
-	var obj map[string]interface{}
-	if err := yaml.Unmarshal(data, &obj); err != nil {
-		return nil, "", fmt.Errorf("parse work spec %q: %w", path, err)
+	phase, _, _ := unstructured.NestedString(obj.Object, "status", "phase")
+	message, _, _ := unstructured.NestedString(obj.Object, "status", "message")
+	artifactURLStatus, _, _ := unstructured.NestedString(obj.Object, "status", "artifactUrl")
+	if artifactURLStatus == "" {
+		artifactURLStatus = artifactURL(s.artifactBaseURL, workName)
 	}
 
-	kind, _ := obj["kind"].(string)
-	if kind != "Work" {
-		return nil, "", fmt.Errorf("unsupported kind %q in %s; expected Work", kind, path)
-	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"name":        workName,
+		"namespace":   ns,
+		"phase":       phase,
+		"message":     message,
+		"artifactUrl": artifactURLStatus,
+	})
+}
 
-	meta, _ := obj["metadata"].(map[string]interface{})
-	if meta == nil {
-		meta = map[string]interface{}{}
-	}
+func writeJSON(w http.ResponseWriter, status int, v interface{}) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+	w.Header().Set("Pragma", "no-cache")
+	w.Header().Set("Expires", "0")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
+}
 
-	baseName, _ := meta["name"].(string)
-	if baseName == "" {
-		baseName = "work"
+func envOr(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
+		return v
 	}
-	workName := buildTimestampedName(baseName, now)
-	meta["name"] = workName
-	delete(meta, "resourceVersion")
-	delete(meta, "uid")
-	delete(meta, "generation")
-	delete(meta, "managedFields")
-	delete(meta, "creationTimestamp")
-	obj["metadata"] = meta
+	return fallback
+}
 
-	out, err := yaml.Marshal(obj)
-	if err != nil {
-		return nil, "", fmt.Errorf("encode timestamped work spec: %w", err)
+func buildRESTConfig(explicitPath string) (*rest.Config, error) {
+	if explicitPath != "" {
+		return clientcmd.BuildConfigFromFlags("", explicitPath)
 	}
-	return out, workName, nil
+	if envPath := os.Getenv("KUBECONFIG"); envPath != "" {
+		return clientcmd.BuildConfigFromFlags("", envPath)
+	}
+	inCluster, err := rest.InClusterConfig()
+	if err == nil {
+		return inCluster, nil
+	}
+	if home := homedir.HomeDir(); home != "" {
+		path := filepath.Join(home, ".kube", "config")
+		if _, statErr := os.Stat(path); statErr == nil {
+			return clientcmd.BuildConfigFromFlags("", path)
+		}
+	}
+	return nil, fmt.Errorf("no usable kubeconfig found: %w", err)
+}
+
+func artifactURL(base, workName string) string {
+	base = strings.TrimRight(base, "/")
+	if base == "" {
+		return ""
+	}
+	return base + "/" + workName + "/"
 }
 
 func buildTimestampedName(base string, now time.Time) string {
@@ -244,20 +293,6 @@ func sanitizeName(v string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-func artifactURLForWork(workName string) string {
-	base := os.Getenv("NEREID_ARTIFACT_BASE_URL")
-	if base == "" {
-		base = "http://nereid-artifacts.yuiseki.com"
-	}
-	base = strings.TrimRight(base, "/")
-	return base + "/" + workName + "/"
-}
-
-type instructionWorkPlan struct {
-	baseName string
-	spec     map[string]interface{}
-}
-
 func planWorksWithPlanner(ctx context.Context, text string) ([]instructionWorkPlan, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("NEREID_PROMPT_PLANNER")))
 	if mode == "" {
@@ -281,27 +316,6 @@ func planWorksWithPlanner(ctx context.Context, text string) ([]instructionWorkPl
 	default:
 		return nil, fmt.Errorf("unsupported NEREID_PROMPT_PLANNER=%q (use auto|llm|rules)", mode)
 	}
-}
-
-func readInstructionText(source string) (string, error) {
-	if source == "-" {
-		b, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			return "", fmt.Errorf("read instruction text from stdin: %w", err)
-		}
-		return string(b), nil
-	}
-
-	if info, err := os.Stat(source); err == nil && !info.IsDir() {
-		b, readErr := os.ReadFile(source)
-		if readErr != nil {
-			return "", fmt.Errorf("read instruction file %q: %w", source, readErr)
-		}
-		return string(b), nil
-	}
-
-	// Fallback: treat argument as inline instruction text.
-	return source, nil
 }
 
 func planWorksFromInstructionText(text string) ([]instructionWorkPlan, error) {
@@ -329,7 +343,6 @@ func splitInstructionLines(text string) []string {
 		if line == "" {
 			continue
 		}
-
 		line = strings.TrimSpace(strings.TrimPrefix(line, "-"))
 		line = strings.TrimSpace(strings.TrimPrefix(line, "・"))
 		line = strings.TrimSpace(strings.TrimPrefix(line, "*"))
@@ -364,6 +377,14 @@ func plannerModel() string {
 	return model
 }
 
+func plannerSystemPrompt() string {
+	return `You are NEREID Prompt Planner.
+Convert the user's mapping instructions into executable NEREID Work specs.
+Output MUST be JSON only:
+{"works":[{"baseName":"short-kebab-case","spec":{...}}]}
+Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1.`
+}
+
 func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, error) {
 	key := plannerAPIKey()
 	if key == "" {
@@ -373,25 +394,18 @@ func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, 
 	reqBody := map[string]interface{}{
 		"model": plannerModel(),
 		"messages": []map[string]string{
-			{
-				"role":    "system",
-				"content": plannerSystemPrompt(),
-			},
-			{
-				"role":    "user",
-				"content": text,
-			},
+			{"role": "system", "content": plannerSystemPrompt()},
+			{"role": "user", "content": text},
 		},
 		"temperature":     0.1,
 		"response_format": map[string]string{"type": "json_object"},
 	}
-
 	rawReq, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("encode planner request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, plannerBaseURL()+"/chat/completions", bytes.NewReader(rawReq))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, plannerBaseURL()+"/chat/completions", strings.NewReader(string(rawReq)))
 	if err != nil {
 		return nil, fmt.Errorf("create planner request: %w", err)
 	}
@@ -426,34 +440,7 @@ func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, 
 	if len(parsed.Choices) == 0 {
 		return nil, errors.New("planner returned no choices")
 	}
-	content := strings.TrimSpace(parsed.Choices[0].Message.Content)
-	return parsePlannerWorks(content)
-}
-
-func plannerSystemPrompt() string {
-	return `You are NEREID Prompt Planner.
-Convert the user's mapping instructions into executable NEREID Work specs.
-
-Output MUST be JSON only (no markdown), with this schema:
-{
-  "works": [
-    {
-      "baseName": "short-kebab-case",
-      "spec": { ... Work.spec object ... }
-    }
-  ]
-}
-
-Rules:
-- Generate one work per instruction item when multiple items are requested.
-- Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1.
-- For overpassql.map.v1, include:
-  spec.title, spec.overpass.endpoint="https://overpass-api.de/api/interpreter", spec.overpass.query.
-- For maplibre.style.v1, include:
-  spec.title, spec.style.sourceStyle.mode, and style JSON/url.
-- Include spec.render.viewport.center [lon,lat] and zoom when possible.
-- Include spec.constraints.deadlineSeconds and spec.artifacts.layout.
-- Return only valid JSON.`
+	return parsePlannerWorks(parsed.Choices[0].Message.Content)
 }
 
 func parsePlannerWorks(content string) ([]instructionWorkPlan, error) {
@@ -488,12 +475,31 @@ func parsePlannerWorks(content string) ([]instructionWorkPlan, error) {
 		if err := validatePlannedSpec(w.Spec); err != nil {
 			return nil, fmt.Errorf("planner work[%d] invalid spec: %w", i, err)
 		}
-		plans = append(plans, instructionWorkPlan{
-			baseName: base,
-			spec:     w.Spec,
-		})
+		plans = append(plans, instructionWorkPlan{baseName: base, spec: w.Spec})
 	}
 	return plans, nil
+}
+
+func extractJSONText(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	if strings.HasPrefix(s, "```") {
+		s = strings.TrimPrefix(s, "```json")
+		s = strings.TrimPrefix(s, "```JSON")
+		s = strings.TrimPrefix(s, "```")
+		s = strings.TrimSpace(s)
+		if i := strings.LastIndex(s, "```"); i >= 0 {
+			s = strings.TrimSpace(s[:i])
+		}
+	}
+	start := strings.Index(s, "{")
+	end := strings.LastIndex(s, "}")
+	if start < 0 || end < 0 || end <= start {
+		return ""
+	}
+	return s[start : end+1]
 }
 
 func normalizePlannedSpec(spec map[string]interface{}) {
@@ -501,20 +507,16 @@ func normalizePlannedSpec(spec map[string]interface{}) {
 	if kind != "maplibre.style.v1" {
 		return
 	}
-
 	style, _ := spec["style"].(map[string]interface{})
 	if style == nil {
 		style = map[string]interface{}{}
 		spec["style"] = style
 	}
-
 	sourceStyle, _ := style["sourceStyle"].(map[string]interface{})
 	if sourceStyle == nil {
 		sourceStyle = map[string]interface{}{}
 		style["sourceStyle"] = sourceStyle
 	}
-
-	// Accept LLM variations.
 	if v, ok := style["json"].(string); ok && strings.TrimSpace(v) != "" {
 		if _, exists := sourceStyle["json"]; !exists {
 			sourceStyle["json"] = v
@@ -536,29 +538,6 @@ func normalizePlannedSpec(spec map[string]interface{}) {
 	case "uri", "link", "https", "http":
 		sourceStyle["mode"] = "url"
 	}
-}
-
-func extractJSONText(s string) string {
-	s = strings.TrimSpace(s)
-	if s == "" {
-		return ""
-	}
-	if strings.HasPrefix(s, "```") {
-		s = strings.TrimPrefix(s, "```json")
-		s = strings.TrimPrefix(s, "```JSON")
-		s = strings.TrimPrefix(s, "```")
-		s = strings.TrimSpace(s)
-		if i := strings.LastIndex(s, "```"); i >= 0 {
-			s = strings.TrimSpace(s[:i])
-		}
-	}
-
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start < 0 || end < 0 || end <= start {
-		return ""
-	}
-	return s[start : end+1]
 }
 
 func validatePlannedSpec(spec map[string]interface{}) error {
@@ -607,7 +586,6 @@ func validatePlannedSpec(spec map[string]interface{}) error {
 			return fmt.Errorf(`unsupported spec.style.sourceStyle.mode=%q`, mode)
 		}
 	case "duckdb.map.v1", "gdal.rastertile.v1", "laz.3dtiles.v1":
-		// Allow through; controller validates detailed required fields.
 	default:
 		return fmt.Errorf("unsupported spec.kind=%q", kind)
 	}
@@ -616,7 +594,6 @@ func validatePlannedSpec(spec map[string]interface{}) error {
 
 func planWorkFromInstructionLine(line string) (instructionWorkPlan, error) {
 	normalized := strings.TrimSpace(line)
-
 	switch {
 	case containsAll(normalized, "台東区", "公園"):
 		return instructionWorkPlan{
@@ -635,7 +612,6 @@ out skel qt;`,
 				139.78, 35.715, 13,
 			),
 		}, nil
-
 	case containsAll(normalized, "東京都", "公園"):
 		if ward, ok := extractSingleTokyoWard(normalized); ok {
 			return instructionWorkPlan{
@@ -655,7 +631,6 @@ out skel qt;`, ward),
 				),
 			}, nil
 		}
-
 	case containsAll(normalized, "台東区", "文京区", "江東区") &&
 		(containsAny(normalized, "セブンイレブン", "ファミリーマート", "ローソン")):
 		return instructionWorkPlan{
@@ -679,7 +654,6 @@ out skel qt;`,
 				139.79, 35.69, 12,
 			),
 		}, nil
-
 	case containsAll(normalized, "国の名前", "青") && containsAll(normalized, "川の名前", "黄"):
 		return instructionWorkPlan{
 			baseName: "country-river-label-colors",
@@ -692,10 +666,7 @@ out skel qt;`,
 						"json": `{
   "version": 8,
   "sources": {
-    "maplibre": {
-      "type": "vector",
-      "url": "https://demotiles.maplibre.org/tiles/tiles.json"
-    }
+    "maplibre": { "type": "vector", "url": "https://demotiles.maplibre.org/tiles/tiles.json" }
   },
   "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   "layers": [
@@ -703,42 +674,18 @@ out skel qt;`,
     { "id": "countries-fill", "type": "fill", "source": "maplibre", "source-layer": "countries", "paint": { "fill-color": "#f8f8f8", "fill-opacity": 0.7 } },
     { "id": "countries-boundary", "type": "line", "source": "maplibre", "source-layer": "countries", "paint": { "line-color": "#8a8a8a", "line-width": 1 } },
     { "id": "geolines", "type": "line", "source": "maplibre", "source-layer": "geolines", "paint": { "line-color": "#4da3ff", "line-width": 1 } },
-    {
-      "id": "geolines-label",
-      "type": "symbol",
-      "source": "maplibre",
-      "source-layer": "geolines",
-      "layout": { "text-field": ["coalesce", ["get", "name_ja"], ["get", "name"], ["get", "name_en"]], "text-size": 11 },
-      "paint": { "text-color": "#ffd400", "text-halo-color": "#111111", "text-halo-width": 1.0 }
-    },
-    {
-      "id": "countries-label",
-      "type": "symbol",
-      "source": "maplibre",
-      "source-layer": "centroids",
-      "layout": { "text-field": ["coalesce", ["get", "name_ja"], ["get", "name"], ["get", "name_en"]], "text-size": 12 },
-      "paint": { "text-color": "#0050ff", "text-halo-color": "#ffffff", "text-halo-width": 1.2 }
-    }
+    { "id": "geolines-label", "type": "symbol", "source": "maplibre", "source-layer": "geolines", "layout": { "text-field": ["coalesce", ["get", "name_ja"], ["get", "name"], ["get", "name_en"]], "text-size": 11 }, "paint": { "text-color": "#ffd400", "text-halo-color": "#111111", "text-halo-width": 1.0 } },
+    { "id": "countries-label", "type": "symbol", "source": "maplibre", "source-layer": "centroids", "layout": { "text-field": ["coalesce", ["get", "name_ja"], ["get", "name"], ["get", "name_en"]], "text-size": 12 }, "paint": { "text-color": "#0050ff", "text-halo-color": "#ffffff", "text-halo-width": 1.2 } }
   ]
 }`,
 					},
 					"validate": true,
 				},
-				"render": map[string]interface{}{
-					"viewport": map[string]interface{}{
-						"center": []float64{0.0, 20.0},
-						"zoom":   1.7,
-					},
-				},
-				"constraints": map[string]interface{}{
-					"deadlineSeconds": int64(300),
-				},
-				"artifacts": map[string]interface{}{
-					"layout": "style",
-				},
+				"render":      map[string]interface{}{"viewport": map[string]interface{}{"center": []float64{0.0, 20.0}, "zoom": 1.7}},
+				"constraints": map[string]interface{}{"deadlineSeconds": int64(300)},
+				"artifacts":   map[string]interface{}{"layout": "style"},
 			},
 		}, nil
-
 	case containsAll(normalized, "人口密度", "国") && containsAny(normalized, "一番高い", "最も高い"):
 		return instructionWorkPlan{
 			baseName: "highest-pop-density-country",
@@ -750,7 +697,6 @@ out geom;`,
 				90.3563, 23.6849, 6,
 			),
 		}, nil
-
 	case containsAll(normalized, "日本", "国") && containsAny(normalized, "一番近い", "最も近い"):
 		return instructionWorkPlan{
 			baseName: "nearest-country-to-japan",
@@ -762,80 +708,27 @@ out geom;`,
 						"mode": "inline",
 						"json": `{
   "version": 8,
-  "sources": {
-    "maplibre": {
-      "type": "vector",
-      "url": "https://demotiles.maplibre.org/tiles/tiles.json"
-    }
-  },
+  "sources": { "maplibre": { "type": "vector", "url": "https://demotiles.maplibre.org/tiles/tiles.json" } },
   "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
   "layers": [
     { "id": "background", "type": "background", "paint": { "background-color": "#f2efe7" } },
     { "id": "countries-base", "type": "fill", "source": "maplibre", "source-layer": "countries", "paint": { "fill-color": "#dddddd", "fill-opacity": 0.7 } },
-    {
-      "id": "country-russia-highlight",
-      "type": "fill",
-      "source": "maplibre",
-      "source-layer": "countries",
-      "filter": ["==", ["coalesce", ["get", "name_en"], ["get", "name"]], "Russia"],
-      "paint": { "fill-color": "#e74c3c", "fill-opacity": 0.55 }
-    },
-    {
-      "id": "country-japan-reference",
-      "type": "fill",
-      "source": "maplibre",
-      "source-layer": "countries",
-      "filter": ["==", ["coalesce", ["get", "name_en"], ["get", "name"]], "Japan"],
-      "paint": { "fill-color": "#2980b9", "fill-opacity": 0.4 }
-    },
+    { "id": "country-russia-highlight", "type": "fill", "source": "maplibre", "source-layer": "countries", "filter": ["==", ["coalesce", ["get", "name_en"], ["get", "name"]], "Russia"], "paint": { "fill-color": "#e74c3c", "fill-opacity": 0.55 } },
+    { "id": "country-japan-reference", "type": "fill", "source": "maplibre", "source-layer": "countries", "filter": ["==", ["coalesce", ["get", "name_en"], ["get", "name"]], "Japan"], "paint": { "fill-color": "#2980b9", "fill-opacity": 0.4 } },
     { "id": "countries-boundary", "type": "line", "source": "maplibre", "source-layer": "countries", "paint": { "line-color": "#666666", "line-width": 0.8 } },
-    {
-      "id": "countries-label",
-      "type": "symbol",
-      "source": "maplibre",
-      "source-layer": "centroids",
-      "layout": { "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]], "text-size": 11 },
-      "paint": { "text-color": "#222222", "text-halo-color": "#ffffff", "text-halo-width": 1.1 }
-    }
+    { "id": "countries-label", "type": "symbol", "source": "maplibre", "source-layer": "centroids", "layout": { "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]], "text-size": 11 }, "paint": { "text-color": "#222222", "text-halo-color": "#ffffff", "text-halo-width": 1.1 } }
   ]
 }`,
 					},
 					"validate": true,
 				},
-				"render": map[string]interface{}{
-					"viewport": map[string]interface{}{
-						"center": []float64{120.0, 50.0},
-						"zoom":   2.2,
-					},
-				},
-				"constraints": map[string]interface{}{
-					"deadlineSeconds": int64(300),
-				},
-				"artifacts": map[string]interface{}{
-					"layout": "style",
-				},
+				"render":      map[string]interface{}{"viewport": map[string]interface{}{"center": []float64{120.0, 50.0}, "zoom": 2.2}},
+				"constraints": map[string]interface{}{"deadlineSeconds": int64(300)},
+				"artifacts":   map[string]interface{}{"layout": "style"},
 			},
 		}, nil
 	}
-
 	return instructionWorkPlan{}, fmt.Errorf("unsupported instruction line: %q", line)
-}
-
-func buildGeneratedWorkSpec(baseName string, spec map[string]interface{}, now time.Time) ([]byte, string, error) {
-	workName := buildTimestampedName(baseName, now)
-	obj := map[string]interface{}{
-		"apiVersion": "nereid.yuiseki.net/v1alpha1",
-		"kind":       "Work",
-		"metadata": map[string]interface{}{
-			"name": workName,
-		},
-		"spec": spec,
-	}
-	out, err := yaml.Marshal(obj)
-	if err != nil {
-		return nil, "", fmt.Errorf("encode generated work spec: %w", err)
-	}
-	return out, workName, nil
 }
 
 func buildOverpassSpec(title, query string, centerLon, centerLat, zoom float64) map[string]interface{} {

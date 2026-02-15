@@ -20,14 +20,24 @@ artifacts:
 images:
   ui: nginxinc/nginx-unprivileged:stable-alpine
   artifacts: nginxinc/nginx-unprivileged:stable-alpine
-  api: hashicorp/http-echo:0.2.3
-  controller: ghcr.io/yuiseki/nereid-controller:latest
+  api: debian:bookworm-slim
+  controller: debian:bookworm-slim
 
 api:
-  text: "nereid api ok"
+  # Host path of locally built API binary mounted into the API pod.
+  binaryHostPath: /home/yuiseki/src/github.com/yuiseki/NEREID/bin/nereid-api
+  workNamespace: nereid
+  promptPlanner: auto
+  llmBaseUrl: ""
+  llmModel: gpt-4o-mini
+  # Optional: set a plaintext key for quick MVP deployment.
+  # Prefer secret management in production.
+  openaiApiKey: ""
 
 controller:
-  enabled: false
+  enabled: true
+  # Host path of locally built controller binary mounted into controller pod.
+  binaryHostPath: /home/yuiseki/src/github.com/yuiseki/NEREID/bin/nereid-controller
   # Empty means use Helm release namespace.
   workNamespace: ""
   # If empty, artifacts.publicBaseUrl is used.

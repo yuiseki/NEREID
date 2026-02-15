@@ -15,9 +15,36 @@ spec:
         app: {{ .Release.Name }}-api
         {{- include "nereid.labels" . | nindent 8 }}
     spec:
+      serviceAccountName: {{ .Release.Name }}-api
       containers:
         - name: api
           image: {{ .Values.images.api }}
-          args: ["-listen=:8080","-text={{ .Values.api.text }}"]
+          command: ["/nereid-api"]
+          env:
+            - name: NEREID_API_BIND
+              value: ":8080"
+            - name: NEREID_WORK_NAMESPACE
+              value: {{ .Values.api.workNamespace | default .Release.Namespace | quote }}
+            - name: NEREID_ARTIFACT_BASE_URL
+              value: {{ .Values.artifacts.publicBaseUrl | quote }}
+            - name: NEREID_PROMPT_PLANNER
+              value: {{ .Values.api.promptPlanner | quote }}
+            - name: NEREID_LLM_BASE_URL
+              value: {{ .Values.api.llmBaseUrl | quote }}
+            - name: NEREID_LLM_MODEL
+              value: {{ .Values.api.llmModel | quote }}
+            {{- if .Values.api.openaiApiKey }}
+            - name: NEREID_OPENAI_API_KEY
+              value: {{ .Values.api.openaiApiKey | quote }}
+            {{- end }}
           ports:
             - containerPort: 8080
+          volumeMounts:
+            - name: api-binary
+              mountPath: /nereid-api
+              readOnly: true
+      volumes:
+        - name: api-binary
+          hostPath:
+            path: {{ .Values.api.binaryHostPath }}
+            type: File

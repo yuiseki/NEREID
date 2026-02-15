@@ -22,6 +22,7 @@ spec:
         - name: controller
           image: {{ .Values.images.controller | quote }}
           imagePullPolicy: IfNotPresent
+          command: ["/nereid-controller"]
           args:
             - --work-namespace={{ .Values.controller.workNamespace | default .Release.Namespace }}
             - --job-namespace={{ .Values.workNamespace.name }}
@@ -34,9 +35,16 @@ spec:
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           volumeMounts:
+            - name: controller-binary
+              mountPath: /nereid-controller
+              readOnly: true
             - name: artifacts-root
               mountPath: {{ .Values.artifacts.hostPath | quote }}
       volumes:
+        - name: controller-binary
+          hostPath:
+            path: {{ .Values.controller.binaryHostPath }}
+            type: File
         - name: artifacts-root
           hostPath:
             path: {{ .Values.artifacts.hostPath }}

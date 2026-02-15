@@ -5,21 +5,307 @@ metadata:
   labels:
     {{- include "nereid.labels" . | nindent 4 }}
 data:
+  default.conf: |
+    server {
+      listen 8080;
+      server_name _;
+      root /usr/share/nginx/html;
+
+      add_header Cache-Control "no-store, no-cache, must-revalidate, max-age=0" always;
+      add_header Pragma "no-cache" always;
+      add_header Expires "0" always;
+
+      location / {
+        try_files $uri $uri/ /index.html;
+      }
+    }
   index.html: |
     <!doctype html>
     <html>
       <head>
         <meta charset="utf-8"/>
         <meta name="viewport" content="width=device-width,initial-scale=1"/>
-        <title>NEREID</title>
+        <title>NEREID Playground</title>
+        <style>
+          :root {
+            --bg: #f6f8fb;
+            --panel: #ffffff;
+            --ink: #13233a;
+            --muted: #5c6f88;
+            --line: #d7e0eb;
+            --brand: #2c6bff;
+            --brand-ink: #ffffff;
+          }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            font-family: "Avenir Next", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+            color: var(--ink);
+            background:
+              radial-gradient(1200px 600px at 8% -20%, #dbe7ff 0%, rgba(219, 231, 255, 0) 70%),
+              radial-gradient(900px 480px at 110% -10%, #d8fff3 0%, rgba(216, 255, 243, 0) 65%),
+              var(--bg);
+            min-height: 100vh;
+          }
+          .shell {
+            width: min(1100px, 94vw);
+            margin: 28px auto;
+          }
+          .headline {
+            margin-bottom: 14px;
+          }
+          h1 {
+            margin: 0 0 6px 0;
+            font-size: clamp(26px, 4vw, 44px);
+            letter-spacing: 0.01em;
+          }
+          .sub {
+            margin: 0;
+            color: var(--muted);
+            font-size: 14px;
+          }
+          .grid {
+            display: grid;
+            grid-template-columns: 1.15fr 0.85fr;
+            gap: 14px;
+          }
+          @media (max-width: 880px) {
+            .grid { grid-template-columns: 1fr; }
+          }
+          .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 18px;
+            box-shadow: 0 12px 36px rgba(16, 40, 74, 0.08);
+          }
+          .left {
+            padding: 16px;
+          }
+          .right {
+            padding: 18px;
+          }
+          textarea {
+            width: 100%;
+            height: clamp(260px, 48vh, 420px);
+            border-radius: 14px;
+            border: 1px solid #c8d6e8;
+            padding: 14px;
+            resize: vertical;
+            font-size: 16px;
+            line-height: 1.6;
+            color: #16283f;
+            background: #fbfdff;
+          }
+          textarea:focus {
+            outline: 2px solid #c7dbff;
+            border-color: var(--brand);
+          }
+          .toolbar {
+            margin-top: 12px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+          }
+          button {
+            border: 0;
+            border-radius: 999px;
+            background: var(--brand);
+            color: var(--brand-ink);
+            font-weight: 700;
+            padding: 12px 20px;
+            cursor: pointer;
+          }
+          button[disabled] { opacity: 0.55; cursor: wait; }
+          .ghost {
+            background: #eef3fb;
+            color: #25466d;
+            font-weight: 600;
+          }
+          .status {
+            font-size: 15px;
+            min-height: 24px;
+            color: #1f4068;
+          }
+          .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-size: 12px;
+            color: #436489;
+            overflow-wrap: anywhere;
+          }
+          .pill {
+            display: inline-block;
+            border: 1px solid #c9d7ea;
+            border-radius: 999px;
+            padding: 4px 10px;
+            font-size: 12px;
+            color: #25466d;
+            margin-right: 6px;
+            margin-bottom: 6px;
+          }
+          .examples {
+            margin-top: 14px;
+          }
+          .examples h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #284f78;
+          }
+          .eg {
+            display: block;
+            width: 100%;
+            text-align: left;
+            background: #f7fbff;
+            color: #21456d;
+            border: 1px solid #d1e0f0;
+            border-radius: 10px;
+            padding: 10px 11px;
+            margin-bottom: 8px;
+            font-size: 13px;
+          }
+        </style>
       </head>
       <body>
-        <h1>NEREID Cloud Playground</h1>
-        <p>AI agents can request and run jobs on k8n/Kueue/Kyverno.</p>
-        <ul>
-          <li><a href="/api">/api</a></li>
-          <li><a href="{{ .Values.artifacts.publicBaseUrl }}/">{{ .Values.artifacts.publicBaseUrl }}/</a></li>
-        </ul>
-        <p>Use CLI: <code>nereid submit examples/works/overpassql.yaml -n {{ .Release.Namespace }}</code></p>
+        <main class="shell">
+          <section class="headline">
+            <h1>NEREID</h1>
+            <p class="sub">Write what map you want. NEREID creates a Work, runs it, and opens the artifact when ready.</p>
+          </section>
+
+          <section class="grid">
+            <article class="card left">
+              <form id="prompt-form">
+                <textarea id="prompt-input" placeholder="例: 東京都台東区の公園を表示してください。"></textarea>
+                <div class="toolbar">
+                  <button type="submit" id="submit-btn">Generate Map</button>
+                  <button type="button" class="ghost" id="clear-btn">Clear</button>
+                </div>
+              </form>
+            </article>
+
+            <aside class="card right">
+              <div>
+                <span class="pill">Host: {{ .Values.host }}</span>
+                <span class="pill">Artifacts: {{ .Values.artifacts.publicBaseUrl }}</span>
+              </div>
+              <p id="status" class="status">Ready.</p>
+              <div id="work-name" class="mono"></div>
+              <div id="artifact-url" class="mono"></div>
+              <div class="examples">
+                <h3>Examples</h3>
+                <button class="eg" type="button">東京都台東区の公園を表示してください。</button>
+                <button class="eg" type="button">東京都台東区と東京都文京区と東京都江東区のセブンイレブンとファミリーマートとローソンを表示してください。</button>
+                <button class="eg" type="button">国の名前を青色にしてください。川の名前を黄色にしてください。</button>
+              </div>
+            </aside>
+          </section>
+        </main>
+
+        <script>
+          const form = document.getElementById("prompt-form");
+          const input = document.getElementById("prompt-input");
+          const statusEl = document.getElementById("status");
+          const workNameEl = document.getElementById("work-name");
+          const artifactEl = document.getElementById("artifact-url");
+          const submitBtn = document.getElementById("submit-btn");
+          const clearBtn = document.getElementById("clear-btn");
+          let pollTimer = null;
+
+          function setBusy(busy) {
+            submitBtn.disabled = busy;
+            submitBtn.textContent = busy ? "Submitting..." : "Generate Map";
+          }
+
+          function stopPolling() {
+            if (pollTimer) {
+              clearInterval(pollTimer);
+              pollTimer = null;
+            }
+          }
+
+          async function pollStatus(workName) {
+            const ts = Date.now();
+            const res = await fetch("/api/status/" + encodeURIComponent(workName) + "?ts=" + ts, {
+              method: "GET",
+              cache: "no-store"
+            });
+            if (!res.ok) {
+              throw new Error("status API failed: " + res.status);
+            }
+            const j = await res.json();
+            const phase = j.phase || "Submitted";
+            const artifact = j.artifactUrl || "";
+            statusEl.textContent = phase === "Succeeded" ? "Completed. Redirecting..." : "Work in progress... (" + phase + ")";
+            if (artifact) artifactEl.textContent = artifact;
+            if (phase === "Succeeded" && artifact) {
+              stopPolling();
+              setTimeout(() => { window.location.href = artifact; }, 600);
+            } else if (phase === "Failed" || phase === "Error") {
+              stopPolling();
+              setBusy(false);
+              statusEl.textContent = "Failed: " + (j.message || "unknown error");
+            }
+          }
+
+          form.addEventListener("submit", async (ev) => {
+            ev.preventDefault();
+            stopPolling();
+            const prompt = input.value.trim();
+            if (!prompt) {
+              statusEl.textContent = "Please input text.";
+              return;
+            }
+            setBusy(true);
+            statusEl.textContent = "Submitting Work...";
+            workNameEl.textContent = "";
+            artifactEl.textContent = "";
+
+            try {
+              const res = await fetch("/api/submit", {
+                method: "POST",
+                cache: "no-store",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ prompt })
+              });
+              const j = await res.json();
+              if (!res.ok) {
+                throw new Error(j.error || ("submit failed: " + res.status));
+              }
+              const workName = j.workName;
+              const artifact = j.artifactUrl || "";
+              workNameEl.textContent = "Work: " + workName;
+              if (artifact) artifactEl.textContent = artifact;
+              statusEl.textContent = "Work in progress...";
+              pollTimer = setInterval(() => {
+                pollStatus(workName).catch((e) => {
+                  stopPolling();
+                  setBusy(false);
+                  statusEl.textContent = "Status check failed: " + e.message;
+                });
+              }, 2500);
+              await pollStatus(workName);
+            } catch (e) {
+              statusEl.textContent = "Error: " + e.message;
+              setBusy(false);
+            }
+          });
+
+          clearBtn.addEventListener("click", () => {
+            input.value = "";
+            statusEl.textContent = "Ready.";
+            workNameEl.textContent = "";
+            artifactEl.textContent = "";
+            stopPolling();
+            setBusy(false);
+            input.focus();
+          });
+
+          document.querySelectorAll(".eg").forEach((btn) => {
+            btn.addEventListener("click", () => {
+              input.value = btn.textContent.trim();
+              input.focus();
+            });
+          });
+        </script>
       </body>
     </html>
