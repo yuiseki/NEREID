@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
@@ -357,6 +359,157 @@ func TestBuildJobUnsupportedKindReturnsError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unsupported spec.kind") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestApplyGrantToJobOverridesQueueRuntimeResourcesAndEnv(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "overpass-sample",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "overpassql.map.v1",
+			"title": "sample",
+			"overpass": map[string]interface{}{
+				"endpoint": "https://overpass-api.de/api/interpreter",
+				"query":    "[out:json];node(1,2,3,4);out;",
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			RuntimeClassName:  "gvisor",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	job, err := c.buildJob(work, "work-overpass-sample", "overpassql.map.v1")
+	if err != nil {
+		t.Fatalf("buildJob() error = %v", err)
+	}
+
+	grant := &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "nereid.yuiseki.net/v1alpha1",
+		"kind":       "Grant",
+		"metadata": map[string]interface{}{
+			"name":      "demo-grant",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kueue": map[string]interface{}{
+				"localQueueName": "grant-queue",
+			},
+			"runtimeClassName": "kata",
+			"resources": map[string]interface{}{
+				"requests": map[string]interface{}{
+					"cpu":    "250m",
+					"memory": "256Mi",
+				},
+				"limits": map[string]interface{}{
+					"cpu":    "1",
+					"memory": "1Gi",
+				},
+			},
+			"env": []interface{}{
+				map[string]interface{}{
+					"name": "OPENAI_API_KEY",
+					"secretKeyRef": map[string]interface{}{
+						"name": "openai",
+						"key":  "api-key",
+					},
+				},
+			},
+		},
+	}}
+
+	if err := c.applyGrantToJob(job, grant); err != nil {
+		t.Fatalf("applyGrantToJob() error = %v", err)
+	}
+
+	if got := job.Labels["kueue.x-k8s.io/queue-name"]; got != "grant-queue" {
+		t.Fatalf("queue label mismatch got=%q want=%q", got, "grant-queue")
+	}
+	if job.Spec.Template.Spec.RuntimeClassName == nil || *job.Spec.Template.Spec.RuntimeClassName != "kata" {
+		t.Fatalf("runtimeClassName mismatch got=%v want=%q", job.Spec.Template.Spec.RuntimeClassName, "kata")
+	}
+
+	container := job.Spec.Template.Spec.Containers[0]
+	cpuReq := container.Resources.Requests[corev1.ResourceCPU]
+	if got := cpuReq.String(); got != "250m" {
+		t.Fatalf("cpu request mismatch got=%q want=%q", got, "250m")
+	}
+	memReq := container.Resources.Requests[corev1.ResourceMemory]
+	if got := memReq.String(); got != "256Mi" {
+		t.Fatalf("memory request mismatch got=%q want=%q", got, "256Mi")
+	}
+	cpuLim := container.Resources.Limits[corev1.ResourceCPU]
+	if got := cpuLim.String(); got != "1" {
+		t.Fatalf("cpu limit mismatch got=%q want=%q", got, "1")
+	}
+	memLim := container.Resources.Limits[corev1.ResourceMemory]
+	if got := memLim.String(); got != "1Gi" {
+		t.Fatalf("memory limit mismatch got=%q want=%q", got, "1Gi")
+	}
+
+	found := false
+	for _, ev := range container.Env {
+		if ev.Name != "OPENAI_API_KEY" {
+			continue
+		}
+		found = true
+		if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
+			t.Fatalf("OPENAI_API_KEY should come from secretKeyRef, got=%+v", ev)
+		}
+		if ev.ValueFrom.SecretKeyRef.Name != "openai" || ev.ValueFrom.SecretKeyRef.Key != "api-key" {
+			t.Fatalf("secretKeyRef mismatch got=%s/%s", ev.ValueFrom.SecretKeyRef.Name, ev.ValueFrom.SecretKeyRef.Key)
+		}
+	}
+	if !found {
+		t.Fatal("OPENAI_API_KEY env not injected")
+	}
+}
+
+func TestAllowedWorksForGrantMaxUsesSelectsEarliestByCreationTimestamp(t *testing.T) {
+	makeWork := func(name string, ts time.Time, grant string) *unstructured.Unstructured {
+		w := &unstructured.Unstructured{Object: map[string]interface{}{
+			"apiVersion": "nereid.yuiseki.net/v1alpha1",
+			"kind":       "Work",
+			"metadata": map[string]interface{}{
+				"name":      name,
+				"namespace": "nereid",
+			},
+			"spec": map[string]interface{}{
+				"kind":  "overpassql.map.v1",
+				"title": "x",
+			},
+		}}
+		w.SetCreationTimestamp(metav1.Time{Time: ts})
+		if grant != "" {
+			_ = unstructured.SetNestedField(w.Object, map[string]interface{}{"name": grant}, "spec", "grantRef")
+		}
+		return w
+	}
+
+	base := time.Date(2026, 2, 15, 7, 0, 0, 0, time.UTC)
+	w1 := makeWork("w1", base.Add(1*time.Minute), "g1")
+	w2 := makeWork("w2", base.Add(2*time.Minute), "g1")
+	w3 := makeWork("w3", base.Add(3*time.Minute), "g1")
+	wOther := makeWork("w-other", base.Add(4*time.Minute), "g2")
+
+	all := []*unstructured.Unstructured{w3, wOther, w1, w2}
+	allowed := allowedWorkNamesForGrantMaxUses(all, "g1", 2)
+	if !allowed["w1"] || !allowed["w2"] {
+		t.Fatalf("expected w1/w2 allowed, got=%v", allowed)
+	}
+	if allowed["w3"] {
+		t.Fatalf("expected w3 denied, got=%v", allowed)
+	}
+	if allowed["w-other"] {
+		t.Fatalf("expected w-other ignored, got=%v", allowed)
 	}
 }
 

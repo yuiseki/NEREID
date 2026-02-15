@@ -51,13 +51,18 @@ func runSubmit(args []string) error {
 		return usageError("submit requires a work spec path")
 	}
 
-	body, workName, err := buildTimestampedWorkSpec(args[0], nowFunc().UTC())
+	grantName, kubectlOpts, err := splitGrantFlag(args[1:])
+	if err != nil {
+		return err
+	}
+
+	body, workName, err := buildTimestampedWorkSpec(args[0], nowFunc().UTC(), grantName)
 	if err != nil {
 		return err
 	}
 
 	kubectlArgs := []string{"create", "-f", "-"}
-	kubectlArgs = append(kubectlArgs, args[1:]...)
+	kubectlArgs = append(kubectlArgs, kubectlOpts...)
 	if err := runKubectlWithInput(body, kubectlArgs...); err != nil {
 		return err
 	}
@@ -89,7 +94,10 @@ func runPrompt(args []string) error {
 	}
 
 	source := args[0]
-	kubectlOpts := args[1:]
+	grantName, kubectlOpts, err := splitGrantFlag(args[1:])
+	if err != nil {
+		return err
+	}
 
 	instructionText, err := readInstructionText(source)
 	if err != nil {
@@ -106,6 +114,7 @@ func runPrompt(args []string) error {
 
 	baseTime := nowFunc().UTC()
 	for i, plan := range plans {
+		injectGrantRef(plan.spec, grantName)
 		body, workName, buildErr := buildGeneratedWorkSpec(plan.baseName, plan.spec, baseTime.Add(time.Duration(i)*time.Second))
 		if buildErr != nil {
 			return buildErr
@@ -151,9 +160,9 @@ func usageError(msg string) error {
 
 func usageText() string {
 	return `Usage:
-  nereid submit <work-spec.yaml> [kubectl create options...]
+  nereid submit <work-spec.yaml> [--grant <grant-name>] [kubectl create options...]
   nereid watch <work-name> [kubectl get options...]
-  nereid prompt <instruction-text|instruction-file.txt> [kubectl create options...]
+  nereid prompt <instruction-text|instruction-file.txt> [--grant <grant-name>] [kubectl create options...]
 
 Examples:
   WORK_NAME=$(nereid submit examples/works/overpassql.yaml -n nereid -o name | cut -d/ -f2)
@@ -161,7 +170,7 @@ Examples:
   nereid prompt examples/instructions/trident-ja.txt -n nereid --dry-run=server -o name`
 }
 
-func buildTimestampedWorkSpec(path string, now time.Time) ([]byte, string, error) {
+func buildTimestampedWorkSpec(path string, now time.Time, grantName string) ([]byte, string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, "", fmt.Errorf("read work spec %q: %w", path, err)
@@ -195,11 +204,58 @@ func buildTimestampedWorkSpec(path string, now time.Time) ([]byte, string, error
 	delete(meta, "creationTimestamp")
 	obj["metadata"] = meta
 
+	if spec, _ := obj["spec"].(map[string]interface{}); spec != nil {
+		injectGrantRef(spec, grantName)
+		obj["spec"] = spec
+	}
+
 	out, err := yaml.Marshal(obj)
 	if err != nil {
 		return nil, "", fmt.Errorf("encode timestamped work spec: %w", err)
 	}
 	return out, workName, nil
+}
+
+func injectGrantRef(spec map[string]interface{}, grantName string) {
+	grantName = strings.TrimSpace(grantName)
+	if grantName == "" || spec == nil {
+		return
+	}
+	spec["grantRef"] = map[string]interface{}{"name": grantName}
+}
+
+func splitGrantFlag(args []string) (string, []string, error) {
+	var grant string
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		if strings.HasPrefix(a, "--grant=") {
+			if grant != "" {
+				return "", nil, usageError("--grant specified multiple times")
+			}
+			grant = strings.TrimPrefix(a, "--grant=")
+			if strings.TrimSpace(grant) == "" {
+				return "", nil, usageError("--grant requires a non-empty value")
+			}
+			continue
+		}
+		if a == "--grant" {
+			if grant != "" {
+				return "", nil, usageError("--grant specified multiple times")
+			}
+			if i+1 >= len(args) {
+				return "", nil, usageError("--grant requires a value")
+			}
+			grant = args[i+1]
+			i++
+			if strings.TrimSpace(grant) == "" {
+				return "", nil, usageError("--grant requires a non-empty value")
+			}
+			continue
+		}
+		out = append(out, a)
+	}
+	return grant, out, nil
 }
 
 func buildTimestampedName(base string, now time.Time) string {

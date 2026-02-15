@@ -48,6 +48,40 @@ func TestRunSubmitBuildsKubectlArgs(t *testing.T) {
 	}
 }
 
+func TestRunSubmitSupportsGrantFlagInjectsGrantRef(t *testing.T) {
+	argsFile, stdinFile := setupFakeKubectl(t, 0)
+	oldNow := nowFunc
+	nowFunc = func() time.Time { return time.Date(2026, 2, 15, 7, 4, 5, 0, time.UTC) }
+	t.Cleanup(func() { nowFunc = oldNow })
+	specPath := writeWorkSpec(t, "overpass-parks-tokyo")
+
+	var runErr error
+	stderr := captureStderr(t, func() {
+		runErr = runSubmit([]string{specPath, "--grant", "demo-grant", "-n", "nereid"})
+	})
+	if runErr != nil {
+		t.Fatalf("runSubmit() error = %v", runErr)
+	}
+	if !strings.Contains(stderr, "artifactUrl=http://nereid-artifacts.yuiseki.com/20260215-0704-overpass-parks-tokyo/") {
+		t.Fatalf("runSubmit() stderr did not include artifact URL, got:\n%s", stderr)
+	}
+
+	got := readLines(t, argsFile)
+	want := []string{"create", "-f", "-", "-n", "nereid"}
+	assertLinesEqual(t, got, want)
+
+	stdin := readFile(t, stdinFile)
+	var obj map[string]interface{}
+	if err := yaml.Unmarshal([]byte(stdin), &obj); err != nil {
+		t.Fatalf("parse kubectl stdin yaml: %v", err)
+	}
+	spec := obj["spec"].(map[string]interface{})
+	grantRef := spec["grantRef"].(map[string]interface{})
+	if gotName := grantRef["name"]; gotName != "demo-grant" {
+		t.Fatalf("spec.grantRef.name mismatch got=%v want=%q", gotName, "demo-grant")
+	}
+}
+
 func TestRunWatchBuildsKubectlArgs(t *testing.T) {
 	argsFile, _ := setupFakeKubectl(t, 0)
 
@@ -148,6 +182,40 @@ func TestRunPromptBuildsKubectlArgsAndGeneratedWork(t *testing.T) {
 	spec := obj["spec"].(map[string]interface{})
 	if gotKind := spec["kind"]; gotKind != "overpassql.map.v1" {
 		t.Fatalf("spec.kind mismatch got=%v", gotKind)
+	}
+}
+
+func TestRunPromptSupportsGrantFlagInjectsGrantRef(t *testing.T) {
+	argsFile, stdinFile := setupFakeKubectl(t, 0)
+	t.Setenv("NEREID_PROMPT_PLANNER", "rules")
+	oldNow := nowFunc
+	nowFunc = func() time.Time { return time.Date(2026, 2, 15, 7, 4, 5, 0, time.UTC) }
+	t.Cleanup(func() { nowFunc = oldNow })
+
+	var runErr error
+	stderr := captureStderr(t, func() {
+		runErr = runPrompt([]string{"東京都台東区の公園を表示してくだい。", "--grant", "demo-grant", "-n", "nereid", "--dry-run=server", "-o", "name"})
+	})
+	if runErr != nil {
+		t.Fatalf("runPrompt() error = %v", runErr)
+	}
+	if !strings.Contains(stderr, "artifactUrl=http://nereid-artifacts.yuiseki.com/20260215-0704-taito-parks/") {
+		t.Fatalf("runPrompt() stderr did not include artifact URL, got:\n%s", stderr)
+	}
+
+	got := readLines(t, argsFile)
+	want := []string{"create", "-f", "-", "-n", "nereid", "--dry-run=server", "-o", "name"}
+	assertLinesEqual(t, got, want)
+
+	stdin := readFile(t, stdinFile)
+	var obj map[string]interface{}
+	if err := yaml.Unmarshal([]byte(stdin), &obj); err != nil {
+		t.Fatalf("parse kubectl stdin yaml: %v", err)
+	}
+	spec := obj["spec"].(map[string]interface{})
+	grantRef := spec["grantRef"].(map[string]interface{})
+	if gotName := grantRef["name"]; gotName != "demo-grant" {
+		t.Fatalf("spec.grantRef.name mismatch got=%v want=%q", gotName, "demo-grant")
 	}
 }
 

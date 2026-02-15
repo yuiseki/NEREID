@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -29,6 +30,12 @@ var workGVR = schema.GroupVersionResource{
 	Group:    "nereid.yuiseki.net",
 	Version:  "v1alpha1",
 	Resource: "works",
+}
+
+var grantGVR = schema.GroupVersionResource{
+	Group:    "nereid.yuiseki.net",
+	Version:  "v1alpha1",
+	Resource: "grants",
 }
 
 const (
@@ -135,12 +142,38 @@ func (c *Controller) reconcileWork(ctx context.Context, work *unstructured.Unstr
 		return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("failed to read spec.kind: %v", err), "")
 	}
 
+	grantName, _, err := unstructured.NestedString(work.Object, "spec", "grantRef", "name")
+	if err != nil {
+		return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("failed to read spec.grantRef.name: %v", err), "")
+	}
+	grantName = strings.TrimSpace(grantName)
+
+	var grant *unstructured.Unstructured
+	if grantName != "" {
+		obj, getErr := c.dynamic.Resource(grantGVR).Namespace(work.GetNamespace()).Get(ctx, grantName, metav1.GetOptions{})
+		if apierrors.IsNotFound(getErr) {
+			return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("grant %q not found", grantName), "")
+		}
+		if getErr != nil {
+			return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("failed to get grant %q: %v", grantName, getErr), "")
+		}
+		grant = obj
+		if validateErr := c.validateGrantForWork(ctx, work, kind, grant); validateErr != nil {
+			return c.updateWorkStatus(ctx, work, "Error", validateErr.Error(), "")
+		}
+	}
+
 	jobName := makeJobName(work.GetName())
 	job, err := c.kube.BatchV1().Jobs(c.cfg.JobNamespace).Get(ctx, jobName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
 		newJob, buildErr := c.buildJob(work, jobName, kind)
 		if buildErr != nil {
 			return c.updateWorkStatus(ctx, work, "Error", buildErr.Error(), "")
+		}
+		if grant != nil {
+			if applyErr := c.applyGrantToJob(newJob, grant); applyErr != nil {
+				return c.updateWorkStatus(ctx, work, "Error", applyErr.Error(), "")
+			}
 		}
 		if _, createErr := c.kube.BatchV1().Jobs(c.cfg.JobNamespace).Create(ctx, newJob, metav1.CreateOptions{}); createErr != nil {
 			return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("failed to create job: %v", createErr), "")
@@ -1241,6 +1274,293 @@ func artifactURL(base, workName string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s/%s/", base, workName)
+}
+
+func (c *Controller) validateGrantForWork(ctx context.Context, work *unstructured.Unstructured, kind string, grant *unstructured.Unstructured) error {
+	if grant == nil {
+		return nil
+	}
+	grantName := grant.GetName()
+
+	enabled, found, err := unstructured.NestedBool(grant.Object, "spec", "enabled")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.enabled: %v", grantName, err)
+	}
+	if found && !enabled {
+		return fmt.Errorf("grant %q is disabled", grantName)
+	}
+
+	expiresAt, _, err := unstructured.NestedString(grant.Object, "spec", "expiresAt")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.expiresAt: %v", grantName, err)
+	}
+	expiresAt = strings.TrimSpace(expiresAt)
+	if expiresAt != "" {
+		ts, parseErr := time.Parse(time.RFC3339, expiresAt)
+		if parseErr != nil {
+			return fmt.Errorf("grant %q has invalid spec.expiresAt=%q (expected RFC3339): %v", grantName, expiresAt, parseErr)
+		}
+		now := c.nowFunc().UTC()
+		if now.After(ts) {
+			return fmt.Errorf("grant %q expired at %s", grantName, ts.UTC().Format(time.RFC3339))
+		}
+	}
+
+	allowedKinds, _, err := unstructured.NestedStringSlice(grant.Object, "spec", "allowedKinds")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.allowedKinds: %v", grantName, err)
+	}
+	if len(allowedKinds) > 0 {
+		ok := false
+		for _, k := range allowedKinds {
+			if strings.TrimSpace(k) == kind {
+				ok = true
+				break
+			}
+		}
+		if !ok {
+			return fmt.Errorf("grant %q does not allow spec.kind=%q", grantName, kind)
+		}
+	}
+
+	maxUses, found, err := unstructured.NestedInt64(grant.Object, "spec", "maxUses")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.maxUses: %v", grantName, err)
+	}
+	if found && maxUses > 0 {
+		jobs, listErr := c.kube.BatchV1().Jobs(c.cfg.JobNamespace).List(ctx, metav1.ListOptions{
+			LabelSelector: fmt.Sprintf("nereid.yuiseki.net/grant=%s", grantName),
+		})
+		if listErr != nil {
+			return fmt.Errorf("list jobs for grant %q maxUses: %w", grantName, listErr)
+		}
+		used := int64(len(jobs.Items))
+		if used >= maxUses {
+			return fmt.Errorf("grant %q exhausted: maxUses=%d used=%d", grantName, maxUses, used)
+		}
+	}
+
+	return nil
+}
+
+func allowedWorkNamesForGrantMaxUses(works []*unstructured.Unstructured, grantName string, maxUses int64) map[string]bool {
+	out := map[string]bool{}
+	grantName = strings.TrimSpace(grantName)
+	if grantName == "" {
+		return out
+	}
+
+	if maxUses <= 0 {
+		for _, w := range works {
+			if workGrantRefName(w) == grantName {
+				out[w.GetName()] = true
+			}
+		}
+		return out
+	}
+
+	candidates := make([]*unstructured.Unstructured, 0, len(works))
+	for _, w := range works {
+		if workGrantRefName(w) == grantName {
+			candidates = append(candidates, w)
+		}
+	}
+
+	sort.SliceStable(candidates, func(i, j int) bool {
+		ti := candidates[i].GetCreationTimestamp().Time
+		tj := candidates[j].GetCreationTimestamp().Time
+		if !ti.Equal(tj) {
+			return ti.Before(tj)
+		}
+		return candidates[i].GetName() < candidates[j].GetName()
+	})
+
+	for i := range candidates {
+		if int64(i) < maxUses {
+			out[candidates[i].GetName()] = true
+		}
+	}
+	return out
+}
+
+func workGrantRefName(work *unstructured.Unstructured) string {
+	if work == nil {
+		return ""
+	}
+	name, _, _ := unstructured.NestedString(work.Object, "spec", "grantRef", "name")
+	return strings.TrimSpace(name)
+}
+
+func (c *Controller) applyGrantToJob(job *batchv1.Job, grant *unstructured.Unstructured) error {
+	if job == nil || grant == nil {
+		return nil
+	}
+	grantName := strings.TrimSpace(grant.GetName())
+
+	if job.Labels == nil {
+		job.Labels = map[string]string{}
+	}
+	if grantName != "" {
+		job.Labels["nereid.yuiseki.net/grant"] = grantName
+	}
+
+	queueName, _, err := unstructured.NestedString(grant.Object, "spec", "kueue", "localQueueName")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.kueue.localQueueName: %v", grantName, err)
+	}
+	queueName = strings.TrimSpace(queueName)
+	if queueName != "" {
+		job.Labels["kueue.x-k8s.io/queue-name"] = queueName
+	}
+
+	runtimeClassName, _, err := unstructured.NestedString(grant.Object, "spec", "runtimeClassName")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.runtimeClassName: %v", grantName, err)
+	}
+	runtimeClassName = strings.TrimSpace(runtimeClassName)
+	if runtimeClassName != "" {
+		job.Spec.Template.Spec.RuntimeClassName = &runtimeClassName
+	}
+
+	if len(job.Spec.Template.Spec.Containers) == 0 {
+		return fmt.Errorf("job has no containers")
+	}
+	container := &job.Spec.Template.Spec.Containers[0]
+	if container.Resources.Requests == nil {
+		container.Resources.Requests = corev1.ResourceList{}
+	}
+	if container.Resources.Limits == nil {
+		container.Resources.Limits = corev1.ResourceList{}
+	}
+
+	reqCPU, _, err := nestedStringAny(grant.Object, "spec", "resources", "requests", "cpu")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.resources.requests.cpu: %v", grantName, err)
+	}
+	reqMem, _, err := nestedStringAny(grant.Object, "spec", "resources", "requests", "memory")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.resources.requests.memory: %v", grantName, err)
+	}
+	limCPU, _, err := nestedStringAny(grant.Object, "spec", "resources", "limits", "cpu")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.resources.limits.cpu: %v", grantName, err)
+	}
+	limMem, _, err := nestedStringAny(grant.Object, "spec", "resources", "limits", "memory")
+	if err != nil {
+		return fmt.Errorf("failed to read grant %q spec.resources.limits.memory: %v", grantName, err)
+	}
+
+	if strings.TrimSpace(reqCPU) != "" {
+		q, parseErr := resource.ParseQuantity(reqCPU)
+		if parseErr != nil {
+			return fmt.Errorf("grant %q invalid spec.resources.requests.cpu=%q: %v", grantName, reqCPU, parseErr)
+		}
+		container.Resources.Requests[corev1.ResourceCPU] = q
+	}
+	if strings.TrimSpace(reqMem) != "" {
+		q, parseErr := resource.ParseQuantity(reqMem)
+		if parseErr != nil {
+			return fmt.Errorf("grant %q invalid spec.resources.requests.memory=%q: %v", grantName, reqMem, parseErr)
+		}
+		container.Resources.Requests[corev1.ResourceMemory] = q
+	}
+	if strings.TrimSpace(limCPU) != "" {
+		q, parseErr := resource.ParseQuantity(limCPU)
+		if parseErr != nil {
+			return fmt.Errorf("grant %q invalid spec.resources.limits.cpu=%q: %v", grantName, limCPU, parseErr)
+		}
+		container.Resources.Limits[corev1.ResourceCPU] = q
+	}
+	if strings.TrimSpace(limMem) != "" {
+		q, parseErr := resource.ParseQuantity(limMem)
+		if parseErr != nil {
+			return fmt.Errorf("grant %q invalid spec.resources.limits.memory=%q: %v", grantName, limMem, parseErr)
+		}
+		container.Resources.Limits[corev1.ResourceMemory] = q
+	}
+
+	envVars, err := grantEnvVars(grant)
+	if err != nil {
+		return err
+	}
+	if len(envVars) > 0 {
+		// Override by name to avoid duplicates.
+		existing := make([]corev1.EnvVar, 0, len(container.Env))
+		toDrop := map[string]bool{}
+		for _, ev := range envVars {
+			toDrop[ev.Name] = true
+		}
+		for _, ev := range container.Env {
+			if !toDrop[ev.Name] {
+				existing = append(existing, ev)
+			}
+		}
+		container.Env = append(existing, envVars...)
+	}
+
+	return nil
+}
+
+func grantEnvVars(grant *unstructured.Unstructured) ([]corev1.EnvVar, error) {
+	if grant == nil {
+		return nil, nil
+	}
+	grantName := grant.GetName()
+	raw, found, err := unstructured.NestedSlice(grant.Object, "spec", "env")
+	if err != nil {
+		return nil, fmt.Errorf("failed to read grant %q spec.env: %v", grantName, err)
+	}
+	if !found || len(raw) == 0 {
+		return nil, nil
+	}
+
+	out := make([]corev1.EnvVar, 0, len(raw))
+	for i, item := range raw {
+		m, ok := item.(map[string]interface{})
+		if !ok {
+			return nil, fmt.Errorf("grant %q spec.env[%d] must be an object", grantName, i)
+		}
+		name, _ := m["name"].(string)
+		name = strings.TrimSpace(name)
+		if name == "" {
+			return nil, fmt.Errorf("grant %q spec.env[%d].name is required", grantName, i)
+		}
+
+		if v, ok := m["value"].(string); ok {
+			out = append(out, corev1.EnvVar{Name: name, Value: v})
+			continue
+		}
+
+		if skr, ok := m["secretKeyRef"].(map[string]interface{}); ok {
+			sec, _ := skr["name"].(string)
+			key, _ := skr["key"].(string)
+			sec = strings.TrimSpace(sec)
+			key = strings.TrimSpace(key)
+			if sec == "" || key == "" {
+				return nil, fmt.Errorf("grant %q spec.env[%d].secretKeyRef.name and key are required", grantName, i)
+			}
+
+			var optional *bool
+			if ov, ok := skr["optional"].(bool); ok {
+				optional = &ov
+			}
+
+			out = append(out, corev1.EnvVar{
+				Name: name,
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: sec},
+						Key:                  key,
+						Optional:             optional,
+					},
+				},
+			})
+			continue
+		}
+
+		return nil, fmt.Errorf("grant %q spec.env[%d] must set value or secretKeyRef", grantName, i)
+	}
+	return out, nil
 }
 
 func extractDeadlineSeconds(work *unstructured.Unstructured) int64 {

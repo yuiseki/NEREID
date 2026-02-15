@@ -27,6 +27,10 @@ spec:
               value: {{ .Values.api.workNamespace | default .Release.Namespace | quote }}
             - name: NEREID_ARTIFACT_BASE_URL
               value: {{ .Values.artifacts.publicBaseUrl | quote }}
+            {{- if .Values.api.defaultGrant }}
+            - name: NEREID_DEFAULT_GRANT
+              value: {{ .Values.api.defaultGrant | quote }}
+            {{- end }}
             - name: NEREID_PROMPT_PLANNER
               value: {{ .Values.api.promptPlanner | quote }}
             - name: NEREID_LLM_BASE_URL

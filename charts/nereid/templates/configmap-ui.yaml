@@ -327,6 +327,7 @@ data:
               <div>
                 <span class="pill">Host: {{ .Values.host }}</span>
                 <span class="pill">Artifacts: {{ .Values.artifacts.publicBaseUrl }}</span>
+                <span class="pill">Grant: ∞</span>
               </div>
               <div class="status-stage" id="status-stage" data-mode="idle">
                 <div class="orbital">

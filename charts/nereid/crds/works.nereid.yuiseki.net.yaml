@@ -26,6 +26,12 @@ spec:
               type: object
               required: ["kind", "title"]
               properties:
+                grantRef:
+                  type: object
+                  properties:
+                    name:
+                      type: string
+                  required: ["name"]
                 kind:
                   type: string
                   enum:

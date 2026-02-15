@@ -34,6 +34,7 @@ type server struct {
 	dynamic         dynamic.Interface
 	workNamespace   string
 	artifactBaseURL string
+	defaultGrant    string
 	logger          *slog.Logger
 }
 
@@ -46,6 +47,7 @@ func main() {
 	addr := envOr("NEREID_API_BIND", ":8080")
 	workNamespace := envOr("NEREID_WORK_NAMESPACE", "nereid")
 	artifactBaseURL := envOr("NEREID_ARTIFACT_BASE_URL", "http://nereid-artifacts.yuiseki.com")
+	defaultGrant := strings.TrimSpace(os.Getenv("NEREID_DEFAULT_GRANT"))
 	kubeconfig := os.Getenv("KUBECONFIG")
 
 	restCfg, err := buildRESTConfig(kubeconfig)
@@ -63,13 +65,14 @@ func main() {
 		dynamic:         dc,
 		workNamespace:   workNamespace,
 		artifactBaseURL: artifactBaseURL,
+		defaultGrant:    defaultGrant,
 		logger:          slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})),
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handle)
 
-	s.logger.Info("nereid-api started", "addr", addr, "workNamespace", workNamespace, "artifactBaseURL", artifactBaseURL)
+	s.logger.Info("nereid-api started", "addr", addr, "workNamespace", workNamespace, "artifactBaseURL", artifactBaseURL, "defaultGrant", defaultGrant)
 	if err := http.ListenAndServe(addr, mux); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
@@ -134,6 +137,11 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	artifactURLs := make([]string, 0, len(plans))
 	for i, p := range plans {
 		workName := buildTimestampedName(p.baseName, now.Add(time.Duration(i)*time.Second))
+
+		if s.defaultGrant != "" {
+			p.spec["grantRef"] = map[string]interface{}{"name": s.defaultGrant}
+		}
+
 		obj := &unstructured.Unstructured{
 			Object: map[string]interface{}{
 				"apiVersion": "nereid.yuiseki.net/v1alpha1",
