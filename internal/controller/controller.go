@@ -517,15 +517,25 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
         const bottomY = size - 2;
         const rx = size * 0.22;
 
+        const strokeW = Math.max(2, Math.floor(size * 0.06));
+
         ctx.fillStyle = "#e53935";
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(255,255,255,0.95)";
+        ctx.lineWidth = strokeW;
+        ctx.shadowColor = "rgba(15,23,42,0.35)";
+        ctx.shadowBlur = size * 0.12;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = size * 0.06;
         ctx.beginPath();
         ctx.moveTo(cx, bottomY);
         ctx.bezierCurveTo(cx + rx * 1.4, size * 0.68, cx + rx * 1.35, size * 0.4, cx, topY);
         ctx.bezierCurveTo(cx - rx * 1.35, size * 0.4, cx - rx * 1.4, size * 0.68, cx, bottomY);
         ctx.closePath();
         ctx.fill();
+        ctx.shadowColor = "rgba(0,0,0,0)";
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
         ctx.stroke();
 
         ctx.fillStyle = "#ffffff";
@@ -545,11 +555,19 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
         const cy = size / 2;
         const r = size * 0.44;
 
+        ctx.shadowColor = "rgba(15,23,42,0.35)";
+        ctx.shadowBlur = size * 0.12;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = size * 0.06;
         ctx.fillStyle = bgColor;
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.fill();
 
+        ctx.shadowColor = "rgba(0,0,0,0)";
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
         ctx.strokeStyle = "rgba(255,255,255,0.9)";
         ctx.lineWidth = Math.max(2, size * 0.05);
         ctx.beginPath();
@@ -574,10 +592,15 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
         const x = (size - w) / 2;
         const y = size * 0.2;
         const r = size * 0.14;
+        const borderW = Math.max(2, Math.floor(size * 0.06));
 
         ctx.fillStyle = "#ffffff";
-        ctx.strokeStyle = "rgba(15,23,42,0.35)";
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = "rgba(15,23,42,0.55)";
+        ctx.lineWidth = borderW;
+        ctx.shadowColor = "rgba(15,23,42,0.35)";
+        ctx.shadowBlur = size * 0.14;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = size * 0.08;
         ctx.beginPath();
         ctx.moveTo(x+r, y);
         ctx.arcTo(x+w, y, x+w, y+h, r);
@@ -586,6 +609,10 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
         ctx.arcTo(x, y, x+w, y, r);
         ctx.closePath();
         ctx.fill();
+        ctx.shadowColor = "rgba(0,0,0,0)";
+        ctx.shadowBlur = 0;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
         ctx.stroke();
 
         ctx.fillStyle = topBand;
@@ -594,7 +621,7 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
         ctx.fillRect(x + 1, y + h * 0.8 - 1, w - 2, h * 0.2);
 
         ctx.fillStyle = textColor;
-        ctx.font = Math.floor(size * 0.25) + "px sans-serif";
+        ctx.font = "900 " + Math.floor(size * 0.34) + "px ui-sans-serif,system-ui,sans-serif";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(label, size / 2, y + h * 0.52);
@@ -660,7 +687,16 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
                 tileSize: 256
               }
             },
-            layers: [{ id: "osm", type: "raster", source: "osm" }]
+            layers: [{
+              id: "osm",
+              type: "raster",
+              source: "osm",
+              paint: {
+                "raster-opacity": 0.92,
+                "raster-saturation": -0.35,
+                "raster-contrast": 0.08
+              }
+            }]
           },
           center: [%f, %f],
           zoom: %f
@@ -710,12 +746,12 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
         }
 
         map.on("load", () => {
-          map.addImage("node-pin", buildPinImage(40), { pixelRatio: 2 });
-          map.addImage("cvs-711", buildStoreBadgeImage("7", 46, "#f97316", "#16a34a", "#dc2626"), { pixelRatio: 2 });
-          map.addImage("cvs-familymart", buildStoreBadgeImage("FM", 46, "#2563eb", "#10b981", "#1d4ed8"), { pixelRatio: 2 });
-          map.addImage("cvs-lawson", buildStoreBadgeImage("L", 46, "#3b82f6", "#2563eb", "#1e3a8a"), { pixelRatio: 2 });
-          map.addImage("way-emoji", buildEmojiImage("🛣️", 44, "rgba(43,108,176,0.82)"), { pixelRatio: 2 });
-          map.addImage("relation-emoji", buildEmojiImage("🧩", 44, "rgba(123,63,228,0.82)"), { pixelRatio: 2 });
+          map.addImage("node-pin", buildPinImage(72), { pixelRatio: 2 });
+          map.addImage("cvs-711", buildStoreBadgeImage("7", 80, "#f97316", "#16a34a", "#dc2626"), { pixelRatio: 2 });
+          map.addImage("cvs-familymart", buildStoreBadgeImage("FM", 80, "#2563eb", "#10b981", "#1d4ed8"), { pixelRatio: 2 });
+          map.addImage("cvs-lawson", buildStoreBadgeImage("L", 80, "#3b82f6", "#2563eb", "#1e3a8a"), { pixelRatio: 2 });
+          map.addImage("way-emoji", buildEmojiImage("🛣️", 64, "rgba(43,108,176,0.82)"), { pixelRatio: 2 });
+          map.addImage("relation-emoji", buildEmojiImage("🧩", 64, "rgba(123,63,228,0.82)"), { pixelRatio: 2 });
 
           map.addSource("areas", { type: "geojson", data: { type: "FeatureCollection", features: fillFeatures } });
           map.addSource("nodes", { type: "geojson", data: { type: "FeatureCollection", features: convenienceNodeFeatures } });
@@ -735,14 +771,54 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
             paint: { "line-color": "#1f77b4", "line-width": 1.5 }
           });
           map.addLayer({
+            id: "node-halo",
+            type: "circle",
+            source: "nodes",
+            paint: {
+              "circle-radius": [
+                "interpolate", ["linear"], ["zoom"],
+                10, 9,
+                12, 11,
+                14, 13,
+                16, 15
+              ],
+              "circle-color": "rgba(255,255,255,0.88)",
+              "circle-stroke-color": [
+                "match", ["coalesce", ["get", "__icon_image"], "node-pin"],
+                "cvs-711", "rgba(220,38,38,0.95)",
+                "cvs-familymart", "rgba(16,185,129,0.95)",
+                "cvs-lawson", "rgba(37,99,235,0.95)",
+                "node-pin", "rgba(229,57,53,0.95)",
+                "rgba(15,23,42,0.65)"
+              ],
+              "circle-stroke-width": [
+                "interpolate", ["linear"], ["zoom"],
+                10, 1.6,
+                14, 2.4,
+                16, 3.0
+              ],
+              "circle-blur": 0.15
+            }
+          });
+          map.addLayer({
             id: "node-pins",
             type: "symbol",
             source: "nodes",
             layout: {
               "icon-image": ["coalesce", ["get", "__icon_image"], "node-pin"],
-              "icon-size": 0.65,
-              "icon-anchor": "bottom",
-              "icon-allow-overlap": true
+              "icon-size": [
+                "interpolate", ["linear"], ["zoom"],
+                10, 0.78,
+                12, 0.92,
+                14, 1.05,
+                16, 1.15
+              ],
+              "icon-anchor": "center",
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true
+            },
+            paint: {
+              "icon-opacity": 1
             }
           });
           map.addLayer({
@@ -751,8 +827,14 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
             source: "way-emoji-points",
             layout: {
               "icon-image": "way-emoji",
-              "icon-size": 0.82,
-              "icon-allow-overlap": true
+              "icon-size": [
+                "interpolate", ["linear"], ["zoom"],
+                10, 0.82,
+                13, 0.95,
+                16, 1.05
+              ],
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true
             }
           });
           map.addLayer({
@@ -761,8 +843,14 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
             source: "relation-emoji-points",
             layout: {
               "icon-image": "relation-emoji",
-              "icon-size": 0.9,
-              "icon-allow-overlap": true
+              "icon-size": [
+                "interpolate", ["linear"], ["zoom"],
+                10, 0.86,
+                13, 1.0,
+                16, 1.1
+              ],
+              "icon-allow-overlap": true,
+              "icon-ignore-placement": true
             }
           });
 
