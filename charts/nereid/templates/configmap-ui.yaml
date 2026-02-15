@@ -163,6 +163,146 @@ data:
             margin-bottom: 8px;
             font-size: 13px;
           }
+          .status-stage {
+            position: relative;
+            margin-top: 12px;
+            border-radius: 14px;
+            border: 1px solid #b9cdef;
+            padding: 12px;
+            background:
+              radial-gradient(circle at 20% 10%, rgba(66, 126, 255, 0.23), rgba(66, 126, 255, 0) 50%),
+              radial-gradient(circle at 80% 90%, rgba(31, 176, 136, 0.22), rgba(31, 176, 136, 0) 50%),
+              linear-gradient(135deg, #f7faff 0%, #ecf5ff 100%);
+            overflow: hidden;
+          }
+          .status-stage::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: linear-gradient(110deg, rgba(255,255,255,0) 10%, rgba(255,255,255,0.45) 45%, rgba(255,255,255,0) 80%);
+            transform: translateX(-140%);
+            animation: stage-shine 2.8s linear infinite;
+            pointer-events: none;
+          }
+          @keyframes stage-shine {
+            to { transform: translateX(140%); }
+          }
+          .orbital {
+            display: grid;
+            place-items: center;
+            height: 96px;
+            position: relative;
+          }
+          .orbital .ring {
+            position: absolute;
+            border-radius: 999px;
+            border: 2px solid transparent;
+          }
+          .ring-a {
+            width: 84px; height: 84px;
+            border-top-color: #2f6fff;
+            border-right-color: #2f6fff;
+            animation: spin 1.6s linear infinite;
+          }
+          .ring-b {
+            width: 62px; height: 62px;
+            border-left-color: #17a188;
+            border-bottom-color: #17a188;
+            animation: spin-rev 1.2s linear infinite;
+          }
+          .ring-c {
+            width: 42px; height: 42px;
+            border-top-color: #ff7a1a;
+            border-right-color: #ff7a1a;
+            animation: spin 0.95s linear infinite;
+          }
+          @keyframes spin { to { transform: rotate(360deg); } }
+          @keyframes spin-rev { to { transform: rotate(-360deg); } }
+          .phase-chip {
+            position: relative;
+            z-index: 2;
+            background: #ffffff;
+            border: 1px solid #c0d3f1;
+            border-radius: 999px;
+            padding: 5px 11px;
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            font-weight: 800;
+            color: #1b4f95;
+            text-transform: uppercase;
+            box-shadow: 0 4px 14px rgba(37, 79, 144, 0.18);
+          }
+          .progress-track {
+            margin-top: 6px;
+            height: 9px;
+            border-radius: 999px;
+            background: rgba(17, 50, 92, 0.14);
+            overflow: hidden;
+          }
+          .progress-fill {
+            height: 100%;
+            width: 0%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #2f6fff, #20b69d, #ff8a2c);
+            background-size: 200% 100%;
+            transition: width 0.55s ease;
+            animation: progress-move 1.25s linear infinite;
+          }
+          @keyframes progress-move {
+            to { background-position: 200% 0; }
+          }
+          .phase-row {
+            margin-top: 10px;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+          }
+          .phase-step {
+            text-align: center;
+            border-radius: 999px;
+            border: 1px solid #bfd1ea;
+            background: rgba(255, 255, 255, 0.82);
+            color: #365980;
+            font-size: 11px;
+            padding: 4px 0;
+            font-weight: 700;
+            transition: transform 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+          }
+          .phase-step.is-active {
+            color: #0f3c7c;
+            border-color: #3d7cff;
+            transform: translateY(-1px);
+          }
+          .phase-step.is-done {
+            color: #0b6e5d;
+            border-color: #17a188;
+          }
+          .phase-meta {
+            margin-top: 8px;
+            text-align: center;
+            font-size: 11px;
+            color: #3d5f86;
+            min-height: 16px;
+          }
+          .status-stage[data-mode="done"] .ring-a,
+          .status-stage[data-mode="done"] .ring-b,
+          .status-stage[data-mode="done"] .ring-c {
+            animation-duration: 0.35s;
+          }
+          .status-stage[data-mode="error"] {
+            border-color: #e8b8b8;
+            background: linear-gradient(135deg, #fff5f5 0%, #fff0f0 100%);
+          }
+          .status-stage[data-mode="error"] .phase-chip {
+            color: #8f1e1e;
+            border-color: #e8b8b8;
+          }
+          .status-stage[data-mode="idle"] .ring-a,
+          .status-stage[data-mode="idle"] .ring-b,
+          .status-stage[data-mode="idle"] .ring-c {
+            animation-play-state: paused;
+            opacity: 0.45;
+          }
         </style>
       </head>
       <body>
@@ -188,6 +328,21 @@ data:
                 <span class="pill">Host: {{ .Values.host }}</span>
                 <span class="pill">Artifacts: {{ .Values.artifacts.publicBaseUrl }}</span>
               </div>
+              <div class="status-stage" id="status-stage" data-mode="idle">
+                <div class="orbital">
+                  <div class="ring ring-a"></div>
+                  <div class="ring ring-b"></div>
+                  <div class="ring ring-c"></div>
+                  <div class="phase-chip" id="phase-chip">IDLE</div>
+                </div>
+                <div class="progress-track"><div class="progress-fill" id="progress-fill"></div></div>
+                <div class="phase-row">
+                  <div class="phase-step" id="step-submitted">SUBMITTED</div>
+                  <div class="phase-step" id="step-running">RUNNING</div>
+                  <div class="phase-step" id="step-succeeded">SUCCEEDED</div>
+                </div>
+                <div class="phase-meta" id="phase-meta">Waiting for input.</div>
+              </div>
               <p id="status" class="status">Ready.</p>
               <div id="work-name" class="mono"></div>
               <div id="artifact-url" class="mono"></div>
@@ -209,7 +364,17 @@ data:
           const artifactEl = document.getElementById("artifact-url");
           const submitBtn = document.getElementById("submit-btn");
           const clearBtn = document.getElementById("clear-btn");
+          const stageEl = document.getElementById("status-stage");
+          const phaseChipEl = document.getElementById("phase-chip");
+          const progressFillEl = document.getElementById("progress-fill");
+          const phaseMetaEl = document.getElementById("phase-meta");
+          const stepSubmittedEl = document.getElementById("step-submitted");
+          const stepRunningEl = document.getElementById("step-running");
+          const stepSucceededEl = document.getElementById("step-succeeded");
           let pollTimer = null;
+          let stageTicker = null;
+          let workStartedAt = 0;
+          let lastPhase = "Idle";
 
           function setBusy(busy) {
             submitBtn.disabled = busy;
@@ -221,6 +386,91 @@ data:
               clearInterval(pollTimer);
               pollTimer = null;
             }
+          }
+
+          function stopStageTicker() {
+            if (stageTicker) {
+              clearInterval(stageTicker);
+              stageTicker = null;
+            }
+          }
+
+          function stopAllTimers() {
+            stopPolling();
+            stopStageTicker();
+          }
+
+          function formatElapsedSeconds(sec) {
+            const s = Math.max(0, Math.floor(sec));
+            const mm = String(Math.floor(s / 60)).padStart(2, "0");
+            const ss = String(s % 60).padStart(2, "0");
+            return mm + ":" + ss;
+          }
+
+          function stepState(el, mode) {
+            el.classList.remove("is-active", "is-done");
+            if (mode === "active") el.classList.add("is-active");
+            if (mode === "done") el.classList.add("is-done");
+          }
+
+          function progressByPhase(phase, elapsedSec) {
+            if (phase === "Submitted") return Math.min(45, 15 + elapsedSec * 1.8);
+            if (phase === "Running") return Math.min(95, 58 + elapsedSec * 0.8);
+            if (phase === "Succeeded") return 100;
+            if (phase === "Failed" || phase === "Error") return 100;
+            return 3;
+          }
+
+          function updateStage(phase, message) {
+            lastPhase = phase || "Idle";
+            const elapsedSec = workStartedAt > 0 ? (Date.now() - workStartedAt) / 1000 : 0;
+            const progress = progressByPhase(lastPhase, elapsedSec);
+            progressFillEl.style.width = progress.toFixed(1) + "%";
+            phaseChipEl.textContent = lastPhase.toUpperCase();
+
+            if (lastPhase === "Succeeded") stageEl.dataset.mode = "done";
+            else if (lastPhase === "Failed" || lastPhase === "Error") stageEl.dataset.mode = "error";
+            else if (lastPhase === "Submitted" || lastPhase === "Running") stageEl.dataset.mode = "busy";
+            else stageEl.dataset.mode = "idle";
+
+            stepState(stepSubmittedEl, "");
+            stepState(stepRunningEl, "");
+            stepState(stepSucceededEl, "");
+
+            if (lastPhase === "Submitted") {
+              stepState(stepSubmittedEl, "active");
+            } else if (lastPhase === "Running") {
+              stepState(stepSubmittedEl, "done");
+              stepState(stepRunningEl, "active");
+            } else if (lastPhase === "Succeeded") {
+              stepState(stepSubmittedEl, "done");
+              stepState(stepRunningEl, "done");
+              stepState(stepSucceededEl, "done");
+              stepSucceededEl.classList.add("is-active");
+            } else if (lastPhase === "Failed" || lastPhase === "Error") {
+              stepState(stepSubmittedEl, "done");
+              stepState(stepRunningEl, "active");
+            }
+
+            if (lastPhase === "Submitted" || lastPhase === "Running") {
+              const label = message || (lastPhase === "Submitted" ? "Waiting for queue admit..." : "Executing Work...");
+              phaseMetaEl.textContent = label + " elapsed " + formatElapsedSeconds(elapsedSec);
+            } else if (lastPhase === "Succeeded") {
+              phaseMetaEl.textContent = "Completed in " + formatElapsedSeconds(elapsedSec) + ". Redirecting...";
+            } else if (lastPhase === "Failed" || lastPhase === "Error") {
+              phaseMetaEl.textContent = message || "Execution failed.";
+            } else {
+              phaseMetaEl.textContent = "Waiting for input.";
+            }
+          }
+
+          function startStageTicker() {
+            stopStageTicker();
+            stageTicker = setInterval(() => {
+              if (lastPhase === "Submitted" || lastPhase === "Running") {
+                updateStage(lastPhase, "");
+              }
+            }, 400);
           }
 
           async function pollStatus(workName) {
@@ -235,13 +485,14 @@ data:
             const j = await res.json();
             const phase = j.phase || "Submitted";
             const artifact = j.artifactUrl || "";
+            updateStage(phase, j.message || "");
             statusEl.textContent = phase === "Succeeded" ? "Completed. Redirecting..." : "Work in progress... (" + phase + ")";
             if (artifact) artifactEl.textContent = artifact;
             if (phase === "Succeeded" && artifact) {
-              stopPolling();
+              stopAllTimers();
               setTimeout(() => { window.location.href = artifact; }, 600);
             } else if (phase === "Failed" || phase === "Error") {
-              stopPolling();
+              stopAllTimers();
               setBusy(false);
               statusEl.textContent = "Failed: " + (j.message || "unknown error");
             }
@@ -249,13 +500,16 @@ data:
 
           form.addEventListener("submit", async (ev) => {
             ev.preventDefault();
-            stopPolling();
+            stopAllTimers();
             const prompt = input.value.trim();
             if (!prompt) {
               statusEl.textContent = "Please input text.";
               return;
             }
             setBusy(true);
+            workStartedAt = Date.now();
+            updateStage("Submitted", "Submitting Work...");
+            startStageTicker();
             statusEl.textContent = "Submitting Work...";
             workNameEl.textContent = "";
             artifactEl.textContent = "";
@@ -275,16 +529,20 @@ data:
               const artifact = j.artifactUrl || "";
               workNameEl.textContent = "Work: " + workName;
               if (artifact) artifactEl.textContent = artifact;
+              updateStage("Submitted", "Waiting for queue admit...");
               statusEl.textContent = "Work in progress...";
               pollTimer = setInterval(() => {
                 pollStatus(workName).catch((e) => {
-                  stopPolling();
+                  stopAllTimers();
                   setBusy(false);
+                  updateStage("Error", e.message);
                   statusEl.textContent = "Status check failed: " + e.message;
                 });
               }, 2500);
               await pollStatus(workName);
             } catch (e) {
+              stopAllTimers();
+              updateStage("Error", e.message);
               statusEl.textContent = "Error: " + e.message;
               setBusy(false);
             }
@@ -295,7 +553,9 @@ data:
             statusEl.textContent = "Ready.";
             workNameEl.textContent = "";
             artifactEl.textContent = "";
-            stopPolling();
+            workStartedAt = 0;
+            updateStage("Idle", "");
+            stopAllTimers();
             setBusy(false);
             input.focus();
           });
@@ -306,6 +566,8 @@ data:
               input.focus();
             });
           });
+
+          updateStage("Idle", "");
         </script>
       </body>
     </html>

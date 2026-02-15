@@ -111,6 +111,14 @@ func TestBuildJobOverpassGeneratesMapLibreArtifactPage(t *testing.T) {
 		"map.flyTo(",
 		"turf.center(normalized)",
 		"node-pins",
+		"way-emojis",
+		"relation-emojis",
+		"buildEmojiImage(",
+		"classifyConvenienceIcon(",
+		"cvs-711",
+		"cvs-familymart",
+		"cvs-lawson",
+		"__icon_image",
 	} {
 		if !strings.Contains(script, needle) {
 			t.Fatalf("script missing %q\nscript:\n%s", needle, script)

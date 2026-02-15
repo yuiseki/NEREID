@@ -503,6 +503,114 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
         return ctx.getImageData(0, 0, size, size);
       }
 
+      function buildEmojiImage(emoji, size, bgColor) {
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        const cx = size / 2;
+        const cy = size / 2;
+        const r = size * 0.44;
+
+        ctx.fillStyle = bgColor;
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "rgba(255,255,255,0.9)";
+        ctx.lineWidth = Math.max(2, size * 0.05);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.font = Math.floor(size * 0.52) + "px 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(emoji, cx, cy + size * 0.02);
+
+        return ctx.getImageData(0, 0, size, size);
+      }
+
+      function buildStoreBadgeImage(label, size, topBand, bottomBand, textColor) {
+        const canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext("2d");
+        const w = size * 0.76;
+        const h = size * 0.62;
+        const x = (size - w) / 2;
+        const y = size * 0.2;
+        const r = size * 0.14;
+
+        ctx.fillStyle = "#ffffff";
+        ctx.strokeStyle = "rgba(15,23,42,0.35)";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(x+r, y);
+        ctx.arcTo(x+w, y, x+w, y+h, r);
+        ctx.arcTo(x+w, y+h, x, y+h, r);
+        ctx.arcTo(x, y+h, x, y, r);
+        ctx.arcTo(x, y, x+w, y, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+
+        ctx.fillStyle = topBand;
+        ctx.fillRect(x + 1, y + 1, w - 2, h * 0.2);
+        ctx.fillStyle = bottomBand;
+        ctx.fillRect(x + 1, y + h * 0.8 - 1, w - 2, h * 0.2);
+
+        ctx.fillStyle = textColor;
+        ctx.font = Math.floor(size * 0.25) + "px sans-serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(label, size / 2, y + h * 0.52);
+
+        return ctx.getImageData(0, 0, size, size);
+      }
+
+      function normalizeStoreText(feature) {
+        const p = feature.properties || {};
+        return [
+          p.brand, p["brand:en"], p["brand:ja"],
+          p.name, p["name:en"], p["name:ja"],
+          p.operator, p["operator:en"], p["operator:ja"],
+          p.chain
+        ].filter(Boolean).join(" ").toLowerCase();
+      }
+
+      function classifyConvenienceIcon(feature) {
+        const text = normalizeStoreText(feature);
+        if (!text) return "node-pin";
+        if (text.includes("7-eleven") || text.includes("7 eleven") || text.includes("seven-eleven") || text.includes("セブン")) {
+          return "cvs-711";
+        }
+        if (text.includes("familymart") || text.includes("family mart") || text.includes("ファミリーマート")) {
+          return "cvs-familymart";
+        }
+        if (text.includes("lawson") || text.includes("ローソン")) {
+          return "cvs-lawson";
+        }
+        return "node-pin";
+      }
+
+      function toPointFeatures(features) {
+        const out = [];
+        for (const f of features) {
+          try {
+            const p = turf.pointOnFeature(f);
+            if (p && p.geometry && p.geometry.type === "Point") {
+              out.push({
+                type: "Feature",
+                properties: Object.assign({}, f.properties || {}),
+                geometry: p.geometry
+              });
+            }
+          } catch (_) {}
+        }
+        return out;
+      }
+
       (async function main() {
         const map = new maplibregl.Map({
           container: "map",
@@ -534,17 +642,52 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
           const isArea = g === "Polygon" || g === "MultiPolygon";
           return (t === "relation" || t === "way") && isArea;
         });
+        const relationAreaFeatures = normalized.features.filter((f) => {
+          const t = f.properties && f.properties.__osm_type;
+          const g = f.geometry && f.geometry.type;
+          return t === "relation" && (g === "Polygon" || g === "MultiPolygon");
+        });
+        const wayGeometryFeatures = normalized.features.filter((f) => {
+          const t = f.properties && f.properties.__osm_type;
+          const g = f.geometry && f.geometry.type;
+          const isWayGeom = g === "Polygon" || g === "MultiPolygon" || g === "LineString" || g === "MultiLineString";
+          return t === "way" && isWayGeom;
+        });
+        const relationEmojiPoints = toPointFeatures(relationAreaFeatures);
+        const wayEmojiPoints = toPointFeatures(wayGeometryFeatures);
         const nodeFeatures = normalized.features.filter((f) => {
           const t = f.properties && f.properties.__osm_type;
           const g = f.geometry && f.geometry.type;
           return t === "node" && g === "Point";
         });
+        const convenienceNodeFeatures = nodeFeatures.map((f) => {
+          const icon = classifyConvenienceIcon(f);
+          return {
+            type: "Feature",
+            geometry: f.geometry,
+            properties: Object.assign({}, f.properties || {}, { __icon_image: icon })
+          };
+        });
+        const iconCounts = { "cvs-711": 0, "cvs-familymart": 0, "cvs-lawson": 0, "node-pin": 0 };
+        for (const f of convenienceNodeFeatures) {
+          const icon = (f.properties && f.properties.__icon_image) || "node-pin";
+          if (Object.prototype.hasOwnProperty.call(iconCounts, icon)) {
+            iconCounts[icon] += 1;
+          }
+        }
 
         map.on("load", () => {
           map.addImage("node-pin", buildPinImage(40), { pixelRatio: 2 });
+          map.addImage("cvs-711", buildStoreBadgeImage("7", 46, "#f97316", "#16a34a", "#dc2626"), { pixelRatio: 2 });
+          map.addImage("cvs-familymart", buildStoreBadgeImage("FM", 46, "#2563eb", "#10b981", "#1d4ed8"), { pixelRatio: 2 });
+          map.addImage("cvs-lawson", buildStoreBadgeImage("L", 46, "#3b82f6", "#2563eb", "#1e3a8a"), { pixelRatio: 2 });
+          map.addImage("way-emoji", buildEmojiImage("🛣️", 44, "rgba(43,108,176,0.82)"), { pixelRatio: 2 });
+          map.addImage("relation-emoji", buildEmojiImage("🧩", 44, "rgba(123,63,228,0.82)"), { pixelRatio: 2 });
 
           map.addSource("areas", { type: "geojson", data: { type: "FeatureCollection", features: fillFeatures } });
-          map.addSource("nodes", { type: "geojson", data: { type: "FeatureCollection", features: nodeFeatures } });
+          map.addSource("nodes", { type: "geojson", data: { type: "FeatureCollection", features: convenienceNodeFeatures } });
+          map.addSource("way-emoji-points", { type: "geojson", data: { type: "FeatureCollection", features: wayEmojiPoints } });
+          map.addSource("relation-emoji-points", { type: "geojson", data: { type: "FeatureCollection", features: relationEmojiPoints } });
 
           map.addLayer({
             id: "area-fill",
@@ -563,9 +706,29 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
             type: "symbol",
             source: "nodes",
             layout: {
-              "icon-image": "node-pin",
+              "icon-image": ["coalesce", ["get", "__icon_image"], "node-pin"],
               "icon-size": 0.65,
               "icon-anchor": "bottom",
+              "icon-allow-overlap": true
+            }
+          });
+          map.addLayer({
+            id: "way-emojis",
+            type: "symbol",
+            source: "way-emoji-points",
+            layout: {
+              "icon-image": "way-emoji",
+              "icon-size": 0.82,
+              "icon-allow-overlap": true
+            }
+          });
+          map.addLayer({
+            id: "relation-emojis",
+            type: "symbol",
+            source: "relation-emoji-points",
+            layout: {
+              "icon-image": "relation-emoji",
+              "icon-size": 0.9,
               "icon-allow-overlap": true
             }
           });
@@ -590,7 +753,13 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
           }
 
           document.getElementById("stats").textContent =
-            "areas(relation+way): " + fillFeatures.length + " / nodes(pins): " + nodeFeatures.length;
+            "areas(relation+way): " + fillFeatures.length +
+            " / nodes(total): " + convenienceNodeFeatures.length +
+            " / 7-Eleven: " + iconCounts["cvs-711"] +
+            " / FamilyMart: " + iconCounts["cvs-familymart"] +
+            " / LAWSON: " + iconCounts["cvs-lawson"] +
+            " / way(🛣️): " + wayEmojiPoints.length +
+            " / relation(🧩): " + relationEmojiPoints.length;
         });
       })().catch((err) => {
         const stats = document.getElementById("stats");

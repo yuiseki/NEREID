@@ -135,6 +135,51 @@ spec:
                       return ctx.getImageData(0, 0, size, size);
                     }
 
+                    function buildEmojiImage(emoji, size, bgColor) {
+                      const canvas = document.createElement("canvas");
+                      canvas.width = size;
+                      canvas.height = size;
+                      const ctx = canvas.getContext("2d");
+                      const cx = size / 2;
+                      const cy = size / 2;
+                      const r = size * 0.44;
+
+                      ctx.fillStyle = bgColor;
+                      ctx.beginPath();
+                      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                      ctx.fill();
+
+                      ctx.strokeStyle = "rgba(255,255,255,0.9)";
+                      ctx.lineWidth = Math.max(2, size * 0.05);
+                      ctx.beginPath();
+                      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+                      ctx.stroke();
+
+                      ctx.font = Math.floor(size * 0.52) + "px 'Apple Color Emoji','Segoe UI Emoji','Noto Color Emoji',sans-serif";
+                      ctx.textAlign = "center";
+                      ctx.textBaseline = "middle";
+                      ctx.fillText(emoji, cx, cy + size * 0.02);
+
+                      return ctx.getImageData(0, 0, size, size);
+                    }
+
+                    function toPointFeatures(features) {
+                      const out = [];
+                      for (const f of features) {
+                        try {
+                          const p = turf.pointOnFeature(f);
+                          if (p && p.geometry && p.geometry.type === "Point") {
+                            out.push({
+                              type: "Feature",
+                              properties: Object.assign({}, f.properties || {}),
+                              geometry: p.geometry
+                            });
+                          }
+                        } catch (_) {}
+                      }
+                      return out;
+                    }
+
                     (async function main() {
                       const map = new maplibregl.Map({
                         container: "map",
@@ -166,6 +211,19 @@ spec:
                         const isArea = g === "Polygon" || g === "MultiPolygon";
                         return (t === "relation" || t === "way") && isArea;
                       });
+                      const relationAreaFeatures = normalized.features.filter((f) => {
+                        const t = f.properties && f.properties.__osm_type;
+                        const g = f.geometry && f.geometry.type;
+                        return t === "relation" && (g === "Polygon" || g === "MultiPolygon");
+                      });
+                      const wayGeometryFeatures = normalized.features.filter((f) => {
+                        const t = f.properties && f.properties.__osm_type;
+                        const g = f.geometry && f.geometry.type;
+                        const isWayGeom = g === "Polygon" || g === "MultiPolygon" || g === "LineString" || g === "MultiLineString";
+                        return t === "way" && isWayGeom;
+                      });
+                      const relationEmojiPoints = toPointFeatures(relationAreaFeatures);
+                      const wayEmojiPoints = toPointFeatures(wayGeometryFeatures);
                       const nodeFeatures = normalized.features.filter((f) => {
                         const t = f.properties && f.properties.__osm_type;
                         const g = f.geometry && f.geometry.type;
@@ -174,9 +232,13 @@ spec:
 
                       map.on("load", () => {
                         map.addImage("node-pin", buildPinImage(40), { pixelRatio: 2 });
+                        map.addImage("way-emoji", buildEmojiImage("🛣️", 44, "rgba(43,108,176,0.82)"), { pixelRatio: 2 });
+                        map.addImage("relation-emoji", buildEmojiImage("🧩", 44, "rgba(123,63,228,0.82)"), { pixelRatio: 2 });
 
                         map.addSource("areas", { type: "geojson", data: { type: "FeatureCollection", features: fillFeatures } });
                         map.addSource("nodes", { type: "geojson", data: { type: "FeatureCollection", features: nodeFeatures } });
+                        map.addSource("way-emoji-points", { type: "geojson", data: { type: "FeatureCollection", features: wayEmojiPoints } });
+                        map.addSource("relation-emoji-points", { type: "geojson", data: { type: "FeatureCollection", features: relationEmojiPoints } });
 
                         map.addLayer({
                           id: "area-fill",
@@ -201,6 +263,26 @@ spec:
                             "icon-allow-overlap": true
                           }
                         });
+                        map.addLayer({
+                          id: "way-emojis",
+                          type: "symbol",
+                          source: "way-emoji-points",
+                          layout: {
+                            "icon-image": "way-emoji",
+                            "icon-size": 0.82,
+                            "icon-allow-overlap": true
+                          }
+                        });
+                        map.addLayer({
+                          id: "relation-emojis",
+                          type: "symbol",
+                          source: "relation-emoji-points",
+                          layout: {
+                            "icon-image": "relation-emoji",
+                            "icon-size": 0.9,
+                            "icon-allow-overlap": true
+                          }
+                        });
 
                         if ((normalized.features || []).length > 0) {
                           const bbox = turf.bbox(normalized);
@@ -222,7 +304,10 @@ spec:
                         }
 
                         document.getElementById("stats").textContent =
-                          "areas(relation+way): " + fillFeatures.length + " / nodes(pins): " + nodeFeatures.length;
+                          "areas(relation+way): " + fillFeatures.length +
+                          " / nodes(pins): " + nodeFeatures.length +
+                          " / way(🛣️): " + wayEmojiPoints.length +
+                          " / relation(🧩): " + relationEmojiPoints.length;
                       });
                     })().catch((err) => {
                       const stats = document.getElementById("stats");
