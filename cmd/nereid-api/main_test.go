@@ -155,6 +155,46 @@ func TestComposeAgentPromptIncludesParentAndContext(t *testing.T) {
 	if !strings.Contains(got, "next instruction") {
 		t.Fatalf("composeAgentPrompt() missing new prompt: %q", got)
 	}
+	if strings.Contains(got, "You are operating inside NEREID artifact workspace.") {
+		t.Fatalf("composeAgentPrompt() should not include fixed system prompt: %q", got)
+	}
+}
+
+func TestComposeAgentPromptWithoutContextReturnsPromptOnly(t *testing.T) {
+	if got := composeAgentPrompt("simple", "", ""); got != "simple" {
+		t.Fatalf("composeAgentPrompt() got=%q want=%q", got, "simple")
+	}
+}
+
+func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
+	script := geminiAgentScript()
+	if !strings.Contains(script, `GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"`) {
+		t.Fatalf("geminiAgentScript() missing GEMINI.md generation: %q", script)
+	}
+	if !strings.Contains(script, `GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"`) {
+		t.Fatalf("geminiAgentScript() missing skill generation: %q", script)
+	}
+	if !strings.Contains(script, "@./.gemini/skills/nereid-artifact-authoring/SKILL.md") {
+		t.Fatalf("geminiAgentScript() missing skill import in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "Absolute security rule (highest priority)") {
+		t.Fatalf("geminiAgentScript() missing highest-priority security rule in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "MUST NOT read, reference, request, print, or persist any environment variable value") {
+		t.Fatalf("geminiAgentScript() missing environment-variable prohibition in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "MUST NOT expose secrets (for example GEMINI_API_KEY)") {
+		t.Fatalf("geminiAgentScript() missing secret exfiltration prohibition in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "MUST NOT use Gemini web_fetch for HTTP API calls") {
+		t.Fatalf("geminiAgentScript() missing web_fetch prohibition in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>") {
+		t.Fatalf("geminiAgentScript() missing strict Nominatim URL template: %q", script)
+	}
+	if !strings.Contains(script, "apt-get install -y -qq --no-install-recommends procps") {
+		t.Fatalf("geminiAgentScript() missing pgrep bootstrap for slim image: %q", script)
+	}
 }
 
 func TestGenerateWorkIDv7(t *testing.T) {

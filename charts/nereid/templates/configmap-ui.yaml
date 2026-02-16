@@ -539,6 +539,7 @@ data:
           const stepRunningEl = document.getElementById("step-running");
           const stepSucceededEl = document.getElementById("step-succeeded");
           let stageTicker = null;
+          let embedRefreshTimer = null;
           let workStartedAt = 0;
           let lastPhase = "Idle";
           const playgroundShellEl = document.getElementById("playground-shell");
@@ -841,6 +842,7 @@ data:
                   embedMetaEl.textContent = "Work: " + workName + " / " + message;
                 }
               }
+              const isTerminalPhase = workName && (phase === "Succeeded" || phase === "Failed" || phase === "Error");
 
               if (!frameReady && workName) {
                 if (phase === "Succeeded") {
@@ -872,7 +874,7 @@ data:
                 embedUserEl.textContent = quickUserInput || "(not found yet)";
                 embedDialogueEl.textContent = "(not found yet)";
                 embedAgentEl.textContent = "(not found yet)";
-                return;
+                return !isTerminalPhase;
               }
 
               const user = await fetchText(artifactUrl + "user-input.txt");
@@ -883,10 +885,17 @@ data:
               embedUserEl.textContent = resolvedUser ? resolvedUser : "(not found yet)";
               embedDialogueEl.textContent = dialogue === null ? "(not found yet)" : (dialogue || "(empty)");
               embedAgentEl.textContent = agent === null ? "(not found yet)" : (agent || "(empty)");
+              return !isTerminalPhase;
             };
 
-            await refresh();
-            setInterval(refresh, 2500);
+            stopEmbedRefreshTicker();
+            const keepPolling = await refresh();
+            if (keepPolling) {
+              embedRefreshTimer = setInterval(async () => {
+                const keep = await refresh();
+                if (!keep) stopEmbedRefreshTicker();
+              }, 2500);
+            }
           }
 
           function setBusy(busy) {
@@ -901,8 +910,16 @@ data:
             }
           }
 
+          function stopEmbedRefreshTicker() {
+            if (embedRefreshTimer) {
+              clearInterval(embedRefreshTimer);
+              embedRefreshTimer = null;
+            }
+          }
+
           function stopAllTimers() {
             stopStageTicker();
+            stopEmbedRefreshTicker();
           }
 
           function formatElapsedSeconds(sec) {

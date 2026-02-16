@@ -90,6 +90,12 @@ For `agent.cli.v1`, NEREID stores conversational artifacts when available:
 - `agent.log` (raw agent stdout/stderr)
 - `dialogue.txt` (`[USER]` + `[AGENT]` combined view)
 
+For Gemini CLI workloads submitted from `/api/submit-agent`:
+
+- NEREID writes runtime guidance to `GEMINI.md` in the artifact workspace.
+- NEREID also writes `.gemini/skills/nereid-artifact-authoring/SKILL.md`.
+- This keeps user input concise while preserving workspace-level execution rules.
+
 Embed view:
 
 - `https://nereid.yuiseki.net/embed?work=<work-name>`

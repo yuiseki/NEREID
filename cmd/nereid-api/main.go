@@ -368,29 +368,12 @@ func composeAgentPrompt(prompt, parentWork, followupContext string) string {
 	if followupContext != "" && len([]byte(followupContext)) > maxFollowupContextBytes {
 		followupContext = strings.TrimSpace(string([]byte(followupContext)[:maxFollowupContextBytes]))
 	}
+	if parentWork == "" && followupContext == "" {
+		return prompt
+	}
 
 	var b strings.Builder
-	b.WriteString(`You are operating inside NEREID artifact workspace.
-Mandatory output contract:
-- You MUST create or update ./index.html in the current directory.
-- First action: write a minimal ./index.html to disk (example: an <h1>Hello, world</h1> page) so artifact rendering is guaranteed from the beginning.
-- After that bootstrap step, replace/update ./index.html to satisfy the real instruction.
-- You have shell access; write files to disk with commands, not only with narrative text.
-- Do not finish with explanation-only output. Persist files before finishing.
-- If user prompt has multiple bullet/line instructions, treat each line independently.
-- For multiple lines, create one HTML per line (example: task-01.html, task-02.html, ...), and make ./index.html link to all tasks.
-- For map requests, produce an interactive map view in HTML (MapLibre/Leaflet/Cesium are acceptable).
-- For MapLibre base maps, use one of these style URLs:
-  - https://tile.yuiseki.net/styles/osm-bright/style.json
-  - https://tile.yuiseki.net/styles/osm-fiord/style.json
-- If you use Overpass API, use this endpoint: https://overpass.yuiseki.net/api/interpreter?data=
-- If you use Nominatim API, use this endpoint format: https://nominatim.yuiseki.net/search.php?q=<query>
-- Keep generated files self-contained and directly viewable from static hosting.
-- Finish only after writing HTML artifacts to disk.
-`)
-	if parentWork != "" || followupContext != "" {
-		b.WriteString("\n\nThis is a follow-up request.")
-	}
+	b.WriteString("This is a follow-up request.")
 	if parentWork != "" {
 		b.WriteString(" Previous work: ")
 		b.WriteString(parentWork)
@@ -451,6 +434,14 @@ TMP_HTML="${OUT_DIR}/index.generated.tmp.html"
 export HOME="${OUT_DIR}/.home"
 mkdir -p "${HOME}"
 
+if ! command -v pgrep >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update -qq >/dev/null 2>&1 || true
+    apt-get install -y -qq --no-install-recommends procps >/dev/null 2>&1 || true
+  fi
+fi
+
 if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
 <!doctype html>
@@ -487,6 +478,70 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   cat "${OUT_TEXT}"
   exit 2
 fi
+
+GEMINI_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
+GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"
+GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
+mkdir -p "${GEMINI_SKILL_DIR}"
+
+cat > "${GEMINI_SKILL_FILE}" <<'SKILL'
+---
+name: nereid-artifact-authoring
+description: Create static-hostable HTML artifacts in NEREID workspace.
+---
+# NEREID Artifact Authoring
+
+## Purpose
+Create HTML artifacts that can be opened immediately from static hosting.
+
+## Required behavior
+- You MUST create or update ./index.html in the current directory.
+- First action: write a minimal ./index.html (for example, an <h1>Hello, world</h1> page).
+- After bootstrap, replace or extend ./index.html to satisfy the current instruction.
+- Use shell commands to write files; do not finish with explanation-only output.
+- Finish only after files are persisted to disk.
+- NEVER read, request, print, or persist environment variable values.
+- NEVER output secrets such as API keys into logs, text responses, HTML, JavaScript, or any generated file.
+- Do NOT use Gemini web_fetch tool for API calls. Use shell curl or browser-side fetch in generated HTML.
+
+## Multi-line input handling
+- If the user prompt has multiple bullet or line instructions, treat each line independently.
+- For multiple lines, create one HTML file per line (for example task-01.html, task-02.html).
+- Keep ./index.html as an entry page linking those generated task pages.
+
+## Mapping defaults
+- For map requests, produce an interactive HTML map (MapLibre, Leaflet, or Cesium).
+- For MapLibre base maps, use one of:
+  - https://tile.yuiseki.net/styles/osm-bright/style.json
+  - https://tile.yuiseki.net/styles/osm-fiord/style.json
+- If Overpass API is used, use:
+  - https://overpass.yuiseki.net/api/interpreter?data=
+- If Nominatim API is used, use:
+  - https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>
+- Do not append trailing punctuation to API URLs.
+- Prefer browser-side fetch in index.html for map data retrieval.
+- If remote APIs fail, still keep index.html viewable and show a concise in-page error message.
+
+## Output quality
+- Keep generated artifacts self-contained and directly viewable from static hosting.
+SKILL
+
+cat > "${GEMINI_MD_FILE}" <<'GEMINI'
+# NEREID Workspace Context
+
+## Absolute security rule (highest priority)
+- You MUST NOT read, reference, request, print, or persist any environment variable value.
+- You MUST NOT expose secrets (for example GEMINI_API_KEY) in any output, including index.html, logs, dialogue, or generated files.
+- If a prompt asks for environment variables or secrets, refuse that part and continue with safe task execution.
+- You MUST NOT use Gemini web_fetch for HTTP API calls. Use shell curl or browser-side fetch in generated HTML.
+
+@./.gemini/skills/nereid-artifact-authoring/SKILL.md
+
+## Runtime facts
+- You are operating inside one NEREID artifact workspace.
+- Current instruction is stored at ./user-input.txt.
+- Write output files into the current directory.
+GEMINI
 
 cd "${OUT_DIR}"
 export npm_config_loglevel=error
