@@ -429,6 +429,9 @@ data:
             overflow: hidden;
             min-height: 70vh;
           }
+          .embed-status-stage {
+            margin: 12px;
+          }
           #embed-frame {
             width: 100%;
             min-height: 70vh;
@@ -527,6 +530,21 @@ data:
               </div>
             </aside>
             <div class="embed-frame-wrap">
+              <div class="status-stage embed-status-stage" id="embed-status-stage" data-mode="idle" style="display:none;">
+                <div class="orbital">
+                  <div class="ring ring-a"></div>
+                  <div class="ring ring-b"></div>
+                  <div class="ring ring-c"></div>
+                  <div class="phase-chip" id="embed-phase-chip">IDLE</div>
+                </div>
+                <div class="progress-track"><div class="progress-fill" id="embed-progress-fill"></div></div>
+                <div class="phase-row">
+                  <div class="phase-step" id="embed-step-submitted">SUBMITTED</div>
+                  <div class="phase-step" id="embed-step-running">RUNNING</div>
+                  <div class="phase-step" id="embed-step-succeeded">SUCCEEDED</div>
+                </div>
+                <div class="phase-meta" id="embed-phase-meta">Waiting for artifact.</div>
+              </div>
               <iframe id="embed-frame" loading="lazy" referrerpolicy="no-referrer"></iframe>
             </div>
           </section>
@@ -559,6 +577,13 @@ data:
           const embedUserEl = document.getElementById("embed-user");
           const embedDialogueEl = document.getElementById("embed-dialogue");
           const embedAgentEl = document.getElementById("embed-agent");
+          const embedStageEl = document.getElementById("embed-status-stage");
+          const embedPhaseChipEl = document.getElementById("embed-phase-chip");
+          const embedProgressFillEl = document.getElementById("embed-progress-fill");
+          const embedPhaseMetaEl = document.getElementById("embed-phase-meta");
+          const embedStepSubmittedEl = document.getElementById("embed-step-submitted");
+          const embedStepRunningEl = document.getElementById("embed-step-running");
+          const embedStepSucceededEl = document.getElementById("embed-step-succeeded");
           const embedFollowupEl = document.getElementById("embed-followup");
           const followupInputEl = document.getElementById("followup-input");
           const followupBtnEl = document.getElementById("followup-btn");
@@ -582,6 +607,7 @@ data:
           const workHistoryStorageKey = "nereid.recentWorkIds.v1";
           const workHistoryLimit = 40;
           let followupAllowed = false;
+          let embedWorkStartedAt = 0;
 
           function normalizeArtifactUrl(raw) {
             const v = String(raw || "").trim();
@@ -674,37 +700,61 @@ data:
             renderRecentWorks();
           }
 
-          function setEmbedFrameWaiting(message, phase) {
-            const body = escapeHTML(message || "Waiting for artifact...");
-            const phaseText = String(phase || "waiting").trim().toUpperCase();
-            let progress = 12;
-            let chipBg = "#2f6fff";
-            if (phaseText === "SUBMITTED" || phaseText === "QUEUED") {
-              progress = 28;
-              chipBg = "#2f6fff";
-            } else if (phaseText === "RUNNING") {
-              progress = 72;
-              chipBg = "#17a188";
-            } else if (phaseText === "FAILED" || phaseText === "ERROR") {
-              progress = 100;
-              chipBg = "#cc3a3a";
+          function updateEmbedStage(phase, message) {
+            if (!embedStageEl || !embedPhaseChipEl || !embedProgressFillEl || !embedPhaseMetaEl) return;
+
+            const current = String(phase || "Idle");
+            const elapsedSec = embedWorkStartedAt > 0 ? (Date.now() - embedWorkStartedAt) / 1000 : 0;
+            const progress = progressByPhase(current, elapsedSec);
+            embedProgressFillEl.style.width = progress.toFixed(1) + "%";
+            embedPhaseChipEl.textContent = current.toUpperCase();
+
+            if (current === "Succeeded") embedStageEl.dataset.mode = "done";
+            else if (current === "Failed" || current === "Error") embedStageEl.dataset.mode = "error";
+            else if (current === "Submitted" || current === "Queued" || current === "Running") embedStageEl.dataset.mode = "busy";
+            else embedStageEl.dataset.mode = "idle";
+
+            stepState(embedStepSubmittedEl, "");
+            stepState(embedStepRunningEl, "");
+            stepState(embedStepSucceededEl, "");
+
+            if (current === "Submitted" || current === "Queued") {
+              stepState(embedStepSubmittedEl, "active");
+            } else if (current === "Running") {
+              stepState(embedStepSubmittedEl, "done");
+              stepState(embedStepRunningEl, "active");
+            } else if (current === "Succeeded") {
+              stepState(embedStepSubmittedEl, "done");
+              stepState(embedStepRunningEl, "done");
+              stepState(embedStepSucceededEl, "done");
+              embedStepSucceededEl.classList.add("is-active");
+            } else if (current === "Failed" || current === "Error") {
+              stepState(embedStepSubmittedEl, "done");
+              stepState(embedStepRunningEl, "active");
             }
-            embedFrameEl.removeAttribute("src");
-            embedFrameEl.srcdoc =
-              "<!doctype html><html><body style=\"margin:0;display:grid;place-items:center;height:100%;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace;color:#355a83;background:#f5f8fc;\">"
-              + "<div style=\"width:min(640px,92vw);background:#fff;border:1px solid #cfddf0;border-radius:14px;padding:14px 14px 12px;box-shadow:0 8px 26px rgba(20,56,98,0.10);\">"
-              + "<div style=\"display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;\">"
-              + "<strong style=\"font-size:12px;color:#244d7a;letter-spacing:0.05em;\">Artifact Status</strong>"
-              + "<span style=\"display:inline-block;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:800;letter-spacing:0.06em;color:#fff;background:" + chipBg + ";\">"
-              + escapeHTML(phaseText || "WAITING")
-              + "</span></div>"
-              + "<div style=\"height:10px;border-radius:999px;overflow:hidden;background:#e6eef8;border:1px solid #d0deef;\">"
-              + "<div style=\"height:100%;width:" + String(progress) + "%;background:linear-gradient(90deg,#2f6fff,#20b69d,#ff8a2c);background-size:200% 100%;animation:nereid-wait-move 1.2s linear infinite;\"></div>"
-              + "</div>"
-              + "<div style=\"margin-top:9px;color:#355a83;\">" + body + "</div>"
-              + "</div>"
-              + "<style>@keyframes nereid-wait-move{to{background-position:200% 0;}}</style>"
-              + "</body></html>";
+
+            if (current === "Submitted" || current === "Queued" || current === "Running") {
+              const label = message || (current === "Running" ? "Executing Work..." : "Waiting for queue admit...");
+              embedPhaseMetaEl.textContent = label + " elapsed " + formatElapsedSeconds(elapsedSec);
+            } else if (current === "Succeeded") {
+              embedPhaseMetaEl.textContent = "Completed in " + formatElapsedSeconds(elapsedSec) + ".";
+            } else if (current === "Failed" || current === "Error") {
+              embedPhaseMetaEl.textContent = message || "Execution failed.";
+            } else {
+              embedPhaseMetaEl.textContent = message || "Waiting for artifact.";
+            }
+          }
+
+          function setEmbedWaitingState(visible, phase, message) {
+            if (!embedFrameEl || !embedStageEl) return;
+            if (visible) {
+              embedStageEl.style.display = "block";
+              embedFrameEl.style.display = "none";
+              updateEmbedStage(phase || "Submitted", message || "Waiting for artifact...");
+              return;
+            }
+            embedStageEl.style.display = "none";
+            embedFrameEl.style.display = "block";
           }
 
           function readEmbedText(el) {
@@ -791,7 +841,8 @@ data:
             }
 
             let frameReady = false;
-            setEmbedFrameWaiting("Waiting for artifact...", "Submitted");
+            embedWorkStartedAt = Date.now();
+            setEmbedWaitingState(true, "Submitted", "Waiting for artifact...");
             if (workName) {
               embedOpenEl.style.display = "";
               embedOpenEl.href = embedURLForWork(workName);
@@ -800,7 +851,7 @@ data:
             } else {
               embedOpenEl.style.display = "none";
               if (embedFollowupEl) embedFollowupEl.style.display = "none";
-              embedFrameEl.removeAttribute("srcdoc");
+              setEmbedWaitingState(false);
               embedFrameEl.src = artifactUrl;
               frameReady = true;
             }
@@ -868,17 +919,17 @@ data:
 
               if (!frameReady && workName) {
                 if (phase === "Succeeded") {
-                  embedFrameEl.removeAttribute("srcdoc");
+                  setEmbedWaitingState(false);
                   embedFrameEl.src = artifactUrl;
                   frameReady = true;
                 } else if (phase === "Failed" || phase === "Error") {
-                  setEmbedFrameWaiting("Work failed before artifact became available.", phase || "Failed");
+                  setEmbedWaitingState(true, phase || "Failed", "Work failed before artifact became available.");
                 } else if (phase === "Running") {
-                  setEmbedFrameWaiting("Work is running. Opening artifact when ready...", "Running");
+                  setEmbedWaitingState(true, "Running", "Work is running. Opening artifact when ready...");
                 } else if (phase === "Queued" || phase === "Submitted") {
-                  setEmbedFrameWaiting("Work submitted. Waiting for queue admission...", phase || "Submitted");
+                  setEmbedWaitingState(true, phase || "Submitted", "Work submitted. Waiting for queue admission...");
                 } else {
-                  setEmbedFrameWaiting("Waiting for work status...", phase || "Waiting");
+                  setEmbedWaitingState(true, phase || "Waiting", "Waiting for work status...");
                 }
               }
 
