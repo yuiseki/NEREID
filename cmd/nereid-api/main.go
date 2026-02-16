@@ -441,6 +441,7 @@ OUT_DIR="${NEREID_ARTIFACT_DIR:-/artifacts/${NEREID_WORK_NAME:-work}}"
 mkdir -p "${OUT_DIR}"
 PROMPT_FILE="${OUT_DIR}/user-input.txt"
 OUT_TEXT="${OUT_DIR}/gemini-output.txt"
+OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
 TMP_HTML="${OUT_DIR}/index.generated.tmp.html"
 export HOME="${OUT_DIR}/.home"
 mkdir -p "${HOME}"
@@ -483,10 +484,23 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
 fi
 
 cd "${OUT_DIR}"
+export npm_config_loglevel=error
+export npm_config_update_notifier=false
+export npm_config_fund=false
+export npm_config_audit=false
+export NO_UPDATE_NOTIFIER=1
 set +e
-npx -y @google/gemini-cli -p "$(cat "${PROMPT_FILE}")" --output-format text --approval-mode yolo > "${OUT_TEXT}" 2>&1
+npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --output-format text --approval-mode yolo > "${OUT_TEXT_RAW}" 2>&1
 status=$?
 set -e
+
+if ! sed \
+  -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
+  -e '/^npm[[:space:]]\+notice/d' \
+  "${OUT_TEXT_RAW}" > "${OUT_TEXT}"; then
+  cp "${OUT_TEXT_RAW}" "${OUT_TEXT}"
+fi
+rm -f "${OUT_TEXT_RAW}"
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
   awk '
