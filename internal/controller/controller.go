@@ -189,6 +189,14 @@ func (c *Controller) reconcileWork(ctx context.Context, work *unstructured.Unstr
 	}
 
 	phase, message := phaseFromJob(job)
+	if phase == "Succeeded" {
+		if validationMessage, validationErr := c.validateSucceededWorkArtifacts(work.GetName()); validationErr != nil {
+			c.logger.Warn("artifact validation skipped due error", "work", work.GetName(), "error", validationErr)
+		} else if validationMessage != "" {
+			phase = "Failed"
+			message = validationMessage
+		}
+	}
 	url := artifactURL(c.cfg.ArtifactBaseURL, work.GetName())
 	return c.updateWorkStatus(ctx, work, phase, message, url)
 }
@@ -947,6 +955,65 @@ func phaseFromJob(job *batchv1.Job) (string, string) {
 		return "Running", "job is running"
 	}
 	return "Submitted", "job submitted"
+}
+
+func (c *Controller) validateSucceededWorkArtifacts(workName string) (string, error) {
+	root := strings.TrimSpace(c.cfg.ArtifactsHostPath)
+	if root == "" {
+		return "", nil
+	}
+	workDir := filepath.Join(root, workName)
+	indexPath := filepath.Join(workDir, "index.html")
+	info, err := os.Stat(indexPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "artifact validation failed: index.html not found", nil
+		}
+		return "", fmt.Errorf("stat %q: %w", indexPath, err)
+	}
+	if info.IsDir() || info.Size() == 0 {
+		return "artifact validation failed: index.html is empty", nil
+	}
+
+	// Detect known runtime fault signatures from agent output files.
+	logPaths := []string{
+		filepath.Join(workDir, "agent.log"),
+		filepath.Join(workDir, "gemini-output.txt"),
+		filepath.Join(workDir, "dialogue.txt"),
+		filepath.Join(workDir, "logs", "agent.log"),
+		filepath.Join(workDir, "logs", "dialogue.txt"),
+	}
+	for _, p := range logPaths {
+		b, readErr := os.ReadFile(p)
+		if readErr != nil {
+			if os.IsNotExist(readErr) {
+				continue
+			}
+			return "", fmt.Errorf("read %q: %w", p, readErr)
+		}
+		if signature := detectArtifactRuntimeErrorSignature(string(b)); signature != "" {
+			return "artifact runtime validation failed: " + signature, nil
+		}
+	}
+	return "", nil
+}
+
+func detectArtifactRuntimeErrorSignature(text string) string {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return ""
+	}
+	lower := strings.ToLower(text)
+	switch {
+	case strings.Contains(lower, "cannot read properties of undefined (reading 'lon')"):
+		return "Cannot read properties of undefined (reading 'lon')"
+	case strings.Contains(lower, "cannot read properties of undefined (reading 'lat')"):
+		return "Cannot read properties of undefined (reading 'lat')"
+	case strings.Contains(lower, "typeerror: cannot read properties of undefined"):
+		return "TypeError: cannot read properties of undefined"
+	default:
+		return ""
+	}
 }
 
 func makeJobName(workName string) string {

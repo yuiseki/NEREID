@@ -68,6 +68,86 @@ func TestPruneArtifactsRemovesEntriesOlderThanRetention(t *testing.T) {
 	}
 }
 
+func TestValidateSucceededWorkArtifactsFailsWhenIndexMissing(t *testing.T) {
+	root := t.TempDir()
+	workName := "work-no-index"
+	if err := os.MkdirAll(filepath.Join(root, workName), 0o755); err != nil {
+		t.Fatalf("mkdir work dir: %v", err)
+	}
+
+	c := &Controller{
+		cfg: Config{
+			ArtifactsHostPath: root,
+		},
+	}
+
+	msg, err := c.validateSucceededWorkArtifacts(workName)
+	if err != nil {
+		t.Fatalf("validateSucceededWorkArtifacts() error = %v", err)
+	}
+	if !strings.Contains(msg, "index.html not found") {
+		t.Fatalf("validateSucceededWorkArtifacts() msg=%q want contains %q", msg, "index.html not found")
+	}
+}
+
+func TestValidateSucceededWorkArtifactsFailsOnRuntimeSignature(t *testing.T) {
+	root := t.TempDir()
+	workName := "work-runtime-error"
+	workDir := filepath.Join(root, workName)
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir work dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "index.html"), []byte("<!doctype html><html><body>ok</body></html>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "gemini-output.txt"), []byte("TypeError: Cannot read properties of undefined (reading 'lon')"), 0o644); err != nil {
+		t.Fatalf("write gemini-output.txt: %v", err)
+	}
+
+	c := &Controller{
+		cfg: Config{
+			ArtifactsHostPath: root,
+		},
+	}
+
+	msg, err := c.validateSucceededWorkArtifacts(workName)
+	if err != nil {
+		t.Fatalf("validateSucceededWorkArtifacts() error = %v", err)
+	}
+	if !strings.Contains(msg, "reading 'lon'") {
+		t.Fatalf("validateSucceededWorkArtifacts() msg=%q want runtime signature", msg)
+	}
+}
+
+func TestValidateSucceededWorkArtifactsPassesWhenNoKnownRuntimeSignature(t *testing.T) {
+	root := t.TempDir()
+	workName := "work-clean"
+	workDir := filepath.Join(root, workName)
+	if err := os.MkdirAll(filepath.Join(workDir, "logs"), 0o755); err != nil {
+		t.Fatalf("mkdir logs dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "index.html"), []byte("<!doctype html><html><body>ok</body></html>"), 0o644); err != nil {
+		t.Fatalf("write index.html: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(workDir, "agent.log"), []byte("all good"), 0o644); err != nil {
+		t.Fatalf("write agent.log: %v", err)
+	}
+
+	c := &Controller{
+		cfg: Config{
+			ArtifactsHostPath: root,
+		},
+	}
+
+	msg, err := c.validateSucceededWorkArtifacts(workName)
+	if err != nil {
+		t.Fatalf("validateSucceededWorkArtifacts() error = %v", err)
+	}
+	if msg != "" {
+		t.Fatalf("validateSucceededWorkArtifacts() msg=%q want empty", msg)
+	}
+}
+
 func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 	kinds := []string{
 		"overpassql.map.v1",
