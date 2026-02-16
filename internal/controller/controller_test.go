@@ -50,6 +50,28 @@ func TestLegacyKindAgentImageForJobDefaults(t *testing.T) {
 	}
 }
 
+func TestIsTerminalWorkPhase(t *testing.T) {
+	tests := []struct {
+		phase string
+		want  bool
+	}{
+		{phase: "", want: false},
+		{phase: "Submitted", want: false},
+		{phase: "Queued", want: false},
+		{phase: "Running", want: false},
+		{phase: "Succeeded", want: true},
+		{phase: "Failed", want: true},
+		{phase: "Error", want: true},
+		{phase: "Canceled", want: true},
+		{phase: "Cancelled", want: true},
+	}
+	for _, tt := range tests {
+		if got := isTerminalWorkPhase(tt.phase); got != tt.want {
+			t.Fatalf("isTerminalWorkPhase(%q)=%v want=%v", tt.phase, got, tt.want)
+		}
+	}
+}
+
 func TestPruneArtifactsRemovesEntriesOlderThanRetention(t *testing.T) {
 	root := t.TempDir()
 	oldPath := filepath.Join(root, "old-work")
@@ -238,7 +260,7 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"legacy-work-spec.json",
 				"GEMINI_MD_FILE",
 				"@google/gemini-cli",
-				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}\"",
+				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}\"",
 				"--model \"${GEMINI_CLI_MODEL}\"",
 				"WARNING: The following project-level hooks have been detected in this workspace:",
 				"legacy-kind-prompt.txt",

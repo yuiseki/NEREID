@@ -32,7 +32,7 @@ func main() {
 	flag.StringVar(&cfg.ArtifactsHostPath, "artifacts-host-path", "/var/lib/nereid/artifacts", "Host path mounted for artifacts.")
 	flag.StringVar(&cfg.ArtifactBaseURL, "artifact-base-url", "http://nereid-artifacts.yuiseki.com", "Base URL used for Work.status.artifactUrl.")
 	flag.DurationVar(&cfg.ArtifactRetention, "artifact-retention", 30*24*time.Hour, "Retention window for entries under artifacts-host-path.")
-	flag.DurationVar(&resync, "resync-interval", 5*time.Second, "Reconcile interval.")
+	flag.DurationVar(&resync, "resync-interval", 1*time.Second, "Reconcile interval.")
 	flag.StringVar(&kubeconfig, "kubeconfig", "", "Path to kubeconfig file (for local execution).")
 	flag.Parse()
 

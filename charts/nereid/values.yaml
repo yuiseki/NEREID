@@ -70,7 +70,7 @@ controller:
   # If empty, artifacts.publicBaseUrl is used.
   artifactBaseUrl: ""
   artifactRetention: 720h
-  resyncInterval: 5s
+  resyncInterval: 1s
   resources:
     requests:
       cpu: "100m"

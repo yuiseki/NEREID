@@ -177,7 +177,7 @@ func TestGeminiAgentScriptUsesWorkspaceTemplate(t *testing.T) {
 		`cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/"`,
 		`cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}"`,
 		`chmod +x "${OUT_DIR}/.gemini/hooks/"*.sh 2>/dev/null || true`,
-		`GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}"`,
+		`GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}"`,
 		`--model "${GEMINI_CLI_MODEL}"`,
 		`YOLO mode is enabled\. All tool calls will be automatically approved\.`,
 		`WARNING: The following project-level hooks have been detected in this workspace:`,

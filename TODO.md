@@ -19,10 +19,20 @@
 - [x] Added runtime overlay logic to copy `/opt/nereid/gemini-workspace` into each work dir when present.
 - [x] Removed inline skill/hook/GEMINI markdown generation from Go runtime scripts and switched to template-only workspace copy.
 - [x] Removed legacy inline skill embedding (`legacy*SkillDoc`) and replaced with kind->skill mapping plus template checks.
+- [x] Reduced controller latency by prioritizing newest non-terminal Works, skipping terminal Works, and shortening resync default to `1s`.
+- [x] Added live runtime log visibility during `Running`:
+  - Gemini output is now streamed into `agent.log` while command is executing.
+  - Bootstrap `index.html` now links/polls `agent.log` in real time.
+- [x] Added Gemini runtime fail-fast controls:
+  - default model switched to `gemini-2.0-flash`
+  - default CLI timeout set to `180s` (`NEREID_GEMINI_TIMEOUT_SECONDS` override)
+- [x] Strengthened `validate-index-html` hook:
+  - reject bootstrap placeholder pages
+  - require map visualization markers for map/display-oriented prompts.
+- [x] Validated end-to-end behavior on `nereid.yuiseki.net` with real prompt:
+  - `東京都台東区の公園を表示してください。`
 
 ## In Progress
-- [ ] Validate end-to-end behavior on `nereid.yuiseki.net` with real prompt:
-  - `東京都台東区の公園を表示してください。`
 - [ ] Confirm whether we should switch Helm default `agentRuntime.image` to a prebuilt custom image (currently default remains `node:22-bookworm-slim`).
 
 ## Pending / Design Decision

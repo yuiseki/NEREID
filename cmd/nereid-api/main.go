@@ -440,6 +440,7 @@ mkdir -p "${OUT_DIR}" "${SPECIALS_SKILLS_DIR}"
 PROMPT_FILE="${OUT_DIR}/user-input.txt"
 OUT_TEXT="${OUT_DIR}/gemini-output.txt"
 OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
+OUT_TEXT_PIPE="${OUT_DIR}/gemini-output.pipe"
 TMP_HTML="${OUT_DIR}/index.generated.tmp.html"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 
@@ -490,11 +491,24 @@ cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
       p { margin: 0; font-size: 13px; color: #355a83; }
     </style>
   </head>
-  <body>
+  <body data-nereid-bootstrap="1">
     <div class="wrap">
       <h1>Hello, world</h1>
       <p>Gemini CLI is preparing artifact output...</p>
+      <p><a href="./agent.log">agent.log</a> / <a href="./gemini-output.raw.txt">gemini-output.raw.txt</a></p>
+      <pre id="out">Waiting for logs...</pre>
     </div>
+    <script>
+      const out = document.getElementById("out");
+      function refresh() {
+        fetch("./agent.log?ts=" + Date.now(), { cache: "no-store" })
+          .then((r) => r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status)))
+          .then((t) => { out.textContent = (t && t.trim().length > 0) ? t : "Waiting for logs..."; })
+          .catch((e) => { out.textContent = "log load failed: " + e.message; });
+      }
+      refresh();
+      setInterval(refresh, 2000);
+    </script>
   </body>
 </html>
 HTMLBOOT
@@ -506,11 +520,25 @@ export npm_config_update_notifier=false
 export npm_config_fund=false
 export npm_config_audit=false
 export NO_UPDATE_NOTIFIER=1
-GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}"
+GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}"
+GEMINI_TIMEOUT_SECONDS="${NEREID_GEMINI_TIMEOUT_SECONDS:-180}"
+rm -f "${OUT_TEXT_PIPE}" "${OUT_TEXT_RAW}"
+mkfifo "${OUT_TEXT_PIPE}"
+tee "${OUT_TEXT_RAW}" < "${OUT_TEXT_PIPE}" &
+TEE_PID=$!
 set +e
-npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_RAW}" 2>&1
+if command -v timeout >/dev/null 2>&1; then
+  timeout "${GEMINI_TIMEOUT_SECONDS}" npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+else
+  npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+fi
 status=$?
 set -e
+wait "${TEE_PID}" || true
+rm -f "${OUT_TEXT_PIPE}"
+if [ "${status}" -eq 124 ]; then
+  printf '\nGemini CLI timed out after %ss.\n' "${GEMINI_TIMEOUT_SECONDS}" >> "${OUT_TEXT_RAW}"
+fi
 
 if ! sed \
   -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
@@ -523,7 +551,7 @@ if ! sed \
 fi
 rm -f "${OUT_TEXT_RAW}"
 
-if [ ! -s "${OUT_DIR}/index.html" ]; then
+if [ ! -s "${OUT_DIR}/index.html" ] || grep -q 'data-nereid-bootstrap="1"' "${OUT_DIR}/index.html"; then
   awk '
     BEGIN {
       tick = sprintf("%c", 96)
@@ -572,7 +600,7 @@ HTMLTAIL
   fi
 fi
 
-if [ ! -s "${OUT_DIR}/index.html" ]; then
+if [ ! -s "${OUT_DIR}/index.html" ] || grep -q 'data-nereid-bootstrap="1"' "${OUT_DIR}/index.html"; then
 cat > "${OUT_DIR}/index.html" <<'HTML'
 <!doctype html>
 <html>

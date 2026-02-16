@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -117,6 +118,8 @@ func (c *Controller) Run(ctx context.Context) error {
 }
 
 func (c *Controller) reconcileAll(ctx context.Context) error {
+	started := time.Now()
+
 	if err := c.pruneArtifacts(); err != nil {
 		c.logger.Error("artifact prune failed", "error", err)
 	}
@@ -131,8 +134,22 @@ func (c *Controller) reconcileAll(ctx context.Context) error {
 		return fmt.Errorf("list works: %w", err)
 	}
 
+	activeWorks := make([]*unstructured.Unstructured, 0, len(list.Items))
+	skippedTerminal := 0
 	for i := range list.Items {
 		work := &list.Items[i]
+		phase, _, _ := unstructured.NestedString(work.Object, "status", "phase")
+		if isTerminalWorkPhase(phase) {
+			skippedTerminal++
+			continue
+		}
+		activeWorks = append(activeWorks, work)
+	}
+	sort.SliceStable(activeWorks, func(i, j int) bool {
+		return activeWorks[i].GetCreationTimestamp().Time.After(activeWorks[j].GetCreationTimestamp().Time)
+	})
+
+	for _, work := range activeWorks {
 		if err := c.reconcileWork(ctx, work); err != nil {
 			c.logger.Error("reconcile work failed",
 				"work", work.GetName(),
@@ -140,6 +157,16 @@ func (c *Controller) reconcileAll(ctx context.Context) error {
 				"error", err,
 			)
 		}
+	}
+
+	duration := time.Since(started)
+	if duration > 2*time.Second || skippedTerminal > 0 {
+		c.logger.Info("reconcile cycle completed",
+			"workTotal", len(list.Items),
+			"workActive", len(activeWorks),
+			"workSkippedTerminal", skippedTerminal,
+			"duration", duration.String(),
+		)
 	}
 	return nil
 }
@@ -156,24 +183,24 @@ func (c *Controller) reconcileWork(ctx context.Context, work *unstructured.Unstr
 	}
 	grantName = strings.TrimSpace(grantName)
 
-	var grant *unstructured.Unstructured
-	if grantName != "" {
-		obj, getErr := c.dynamic.Resource(grantGVR).Namespace(work.GetNamespace()).Get(ctx, grantName, metav1.GetOptions{})
-		if apierrors.IsNotFound(getErr) {
-			return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("grant %q not found", grantName), "")
-		}
-		if getErr != nil {
-			return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("failed to get grant %q: %v", grantName, getErr), "")
-		}
-		grant = obj
-		if validateErr := c.validateGrantForWork(ctx, work, kind, grant); validateErr != nil {
-			return c.updateWorkStatus(ctx, work, "Error", validateErr.Error(), "")
-		}
-	}
-
 	jobName := makeJobName(work.GetName())
 	job, err := c.kube.BatchV1().Jobs(c.cfg.JobNamespace).Get(ctx, jobName, metav1.GetOptions{})
 	if apierrors.IsNotFound(err) {
+		var grant *unstructured.Unstructured
+		if grantName != "" {
+			obj, getErr := c.dynamic.Resource(grantGVR).Namespace(work.GetNamespace()).Get(ctx, grantName, metav1.GetOptions{})
+			if apierrors.IsNotFound(getErr) {
+				return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("grant %q not found", grantName), "")
+			}
+			if getErr != nil {
+				return c.updateWorkStatus(ctx, work, "Error", fmt.Sprintf("failed to get grant %q: %v", grantName, getErr), "")
+			}
+			grant = obj
+			if validateErr := c.validateGrantForWork(ctx, work, kind, grant); validateErr != nil {
+				return c.updateWorkStatus(ctx, work, "Error", validateErr.Error(), "")
+			}
+		}
+
 		newJob, buildErr := c.buildJob(work, jobName, kind)
 		if buildErr != nil {
 			return c.updateWorkStatus(ctx, work, "Error", buildErr.Error(), "")
@@ -209,6 +236,15 @@ func (c *Controller) reconcileWork(ctx context.Context, work *unstructured.Unstr
 	}
 	url := artifactURL(c.cfg.ArtifactBaseURL, work.GetName())
 	return c.updateWorkStatus(ctx, work, phase, message, url)
+}
+
+func isTerminalWorkPhase(phase string) bool {
+	switch strings.TrimSpace(phase) {
+	case "Succeeded", "Failed", "Error", "Canceled", "Cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *Controller) buildJob(work *unstructured.Unstructured, jobName, kind string) (*batchv1.Job, error) {
@@ -378,6 +414,7 @@ SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"
 mkdir -p "${OUT_DIR}" "${SPECIALS_SKILLS_DIR}"
 OUT_TEXT="${OUT_DIR}/gemini-output.txt"
 OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
+OUT_TEXT_PIPE="${OUT_DIR}/gemini-output.pipe"
 PROMPT_FILE="${OUT_DIR}/legacy-kind-prompt.txt"
 SPEC_FILE="${OUT_DIR}/legacy-work-spec.json"
 KIND_SKILL_FILE="${OUT_DIR}/.gemini/skills/%s/SKILL.md"
@@ -401,11 +438,24 @@ cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
       p { margin: 0; font-size: 13px; color: #355a83; }
     </style>
   </head>
-  <body>
+  <body data-nereid-bootstrap="1">
     <div class="wrap">
       <h1>Hello, world</h1>
       <p>Gemini CLI is bridging a legacy kind specification...</p>
+      <p><a href="./agent.log">agent.log</a> / <a href="./gemini-output.raw.txt">gemini-output.raw.txt</a></p>
+      <pre id="out">Waiting for logs...</pre>
     </div>
+    <script>
+      const out = document.getElementById("out");
+      function refresh() {
+        fetch("./agent.log?ts=" + Date.now(), { cache: "no-store" })
+          .then((r) => r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status)))
+          .then((t) => { out.textContent = (t && t.trim().length > 0) ? t : "Waiting for logs..."; })
+          .catch((e) => { out.textContent = "log load failed: " + e.message; });
+      }
+      refresh();
+      setInterval(refresh, 2000);
+    </script>
   </body>
 </html>
 HTMLBOOT
@@ -452,11 +502,25 @@ export npm_config_update_notifier=false
 export npm_config_fund=false
 export npm_config_audit=false
 export NO_UPDATE_NOTIFIER=1
-GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}"
+GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}"
+GEMINI_TIMEOUT_SECONDS="${NEREID_GEMINI_TIMEOUT_SECONDS:-180}"
+rm -f "${OUT_TEXT_PIPE}" "${OUT_TEXT_RAW}"
+mkfifo "${OUT_TEXT_PIPE}"
+tee "${OUT_TEXT_RAW}" < "${OUT_TEXT_PIPE}" &
+TEE_PID=$!
 set +e
-npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_RAW}" 2>&1
+if command -v timeout >/dev/null 2>&1; then
+  timeout "${GEMINI_TIMEOUT_SECONDS}" npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+else
+  npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+fi
 status=$?
 set -e
+wait "${TEE_PID}" || true
+rm -f "${OUT_TEXT_PIPE}"
+if [ "${status}" -eq 124 ]; then
+  printf '\nGemini CLI timed out after %%ss.\n' "${GEMINI_TIMEOUT_SECONDS}" >> "${OUT_TEXT_RAW}"
+fi
 
 if ! sed \
   -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
