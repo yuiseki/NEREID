@@ -53,7 +53,9 @@ type instructionWorkPlan struct {
 
 const (
 	userPromptAnnotationKey = "nereid.yuiseki.net/user-prompt"
+	followupOfAnnotationKey = "nereid.yuiseki.net/followup-of"
 	maxUserPromptBytes      = 16 * 1024
+	maxFollowupContextBytes = 16 * 1024
 
 	plannerProviderOpenAI = "openai"
 	plannerProviderGemini = "gemini"
@@ -62,6 +64,20 @@ const (
 type plannerCredentials struct {
 	key      string
 	provider string
+}
+
+type submitRequest struct {
+	Prompt    string `json:"prompt"`
+	Namespace string `json:"namespace"`
+	Grant     string `json:"grant"`
+}
+
+type submitAgentRequest struct {
+	Prompt       string `json:"prompt"`
+	Namespace    string `json:"namespace"`
+	Grant        string `json:"grant"`
+	ParentWork   string `json:"parentWork"`
+	FollowupNote string `json:"followupContext"`
 }
 
 func main() {
@@ -111,6 +127,9 @@ func (s *server) handle(w http.ResponseWriter, r *http.Request) {
 	case (r.URL.Path == "/api/submit" || r.URL.Path == "/submit") && r.Method == http.MethodPost:
 		s.handleSubmit(w, r)
 		return
+	case (r.URL.Path == "/api/submit-agent" || r.URL.Path == "/submit-agent" || r.URL.Path == "/api/followup" || r.URL.Path == "/followup") && r.Method == http.MethodPost:
+		s.handleSubmitAgent(w, r)
+		return
 	case (strings.HasPrefix(r.URL.Path, "/api/status/") || strings.HasPrefix(r.URL.Path, "/status/")) && r.Method == http.MethodGet:
 		s.handleStatus(w, r)
 		return
@@ -130,11 +149,7 @@ func (s *server) handle(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
-	var req struct {
-		Prompt    string `json:"prompt"`
-		Namespace string `json:"namespace"`
-		Grant     string `json:"grant"`
-	}
+	var req submitRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid JSON body"})
 		return
@@ -145,16 +160,8 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ns := s.workNamespace
-	if strings.TrimSpace(req.Namespace) != "" {
-		ns = strings.TrimSpace(req.Namespace)
-	}
-
-	grantName := strings.TrimSpace(req.Grant)
-	if grantName == "" {
-		grantName = s.defaultGrant
-	}
-	grantName = strings.TrimSpace(grantName)
+	ns := resolveNamespace(req.Namespace, s.workNamespace)
+	grantName := resolveGrantName(req.Grant, s.defaultGrant)
 
 	plannerCreds := plannerCredentialsFromEnv()
 	allowedKinds := []string(nil)
@@ -187,7 +194,7 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	workNames := make([]string, 0, len(plans))
 	artifactURLs := make([]string, 0, len(plans))
-	promptAnnotation := userPromptAnnotationValue(req.Prompt)
+	annotations := workAnnotations(req.Prompt, "")
 	for i, p := range plans {
 		workName := buildTimestampedName(p.baseName, now.Add(time.Duration(i)*time.Second))
 
@@ -195,25 +202,7 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			p.spec["grantRef"] = map[string]interface{}{"name": grantName}
 		}
 
-		metadata := map[string]interface{}{
-			"name": workName,
-		}
-		if promptAnnotation != "" {
-			metadata["annotations"] = map[string]interface{}{
-				userPromptAnnotationKey: promptAnnotation,
-			}
-		}
-
-		obj := &unstructured.Unstructured{
-			Object: map[string]interface{}{
-				"apiVersion": "nereid.yuiseki.net/v1alpha1",
-				"kind":       "Work",
-				"metadata":   metadata,
-				"spec":       p.spec,
-			},
-		}
-
-		if _, createErr := s.dynamic.Resource(workGVR).Namespace(ns).Create(r.Context(), obj, metav1.CreateOptions{}); createErr != nil {
+		if createErr := s.createWork(r.Context(), ns, workName, p.spec, annotations); createErr != nil {
 			if apierrors.IsAlreadyExists(createErr) {
 				continue
 			}
@@ -236,6 +225,251 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		"workNames":    workNames,
 		"artifactUrls": artifactURLs,
 	})
+}
+
+func (s *server) handleSubmitAgent(w http.ResponseWriter, r *http.Request) {
+	var req submitAgentRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "invalid JSON body"})
+		return
+	}
+
+	req.Prompt = strings.TrimSpace(req.Prompt)
+	req.ParentWork = strings.TrimSpace(req.ParentWork)
+	req.FollowupNote = strings.TrimSpace(req.FollowupNote)
+	if req.Prompt == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "prompt is required"})
+		return
+	}
+
+	ns := resolveNamespace(req.Namespace, s.workNamespace)
+	grantName := resolveGrantName(req.Grant, s.defaultGrant)
+
+	if req.ParentWork != "" {
+		parent, err := s.dynamic.Resource(workGVR).Namespace(ns).Get(r.Context(), req.ParentWork, metav1.GetOptions{})
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": fmt.Sprintf("parent work %q not found", req.ParentWork)})
+				return
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("get parent work failed: %v", err)})
+			return
+		}
+		parentKind, _, _ := unstructured.NestedString(parent.Object, "spec", "kind")
+		if strings.TrimSpace(parentKind) != "agent.cli.v1" {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": "parent work must be spec.kind=agent.cli.v1"})
+			return
+		}
+		if grantName == "" {
+			parentGrant, _, _ := unstructured.NestedString(parent.Object, "spec", "grantRef", "name")
+			grantName = strings.TrimSpace(parentGrant)
+		}
+	}
+
+	spec := buildGeminiAgentSpec(req.Prompt)
+	if grantName != "" {
+		spec["grantRef"] = map[string]interface{}{"name": grantName}
+	}
+	promptForAgent := composeAgentPrompt(req.Prompt, req.ParentWork, req.FollowupNote)
+	annotations := workAnnotations(promptForAgent, req.ParentWork)
+
+	workName := ""
+	for i := 0; i < 5; i++ {
+		candidate := buildTimestampedName(fmt.Sprintf("gemini-cli-task-%06d", time.Now().UTC().UnixNano()%1_000_000), time.Now().UTC())
+		if err := s.createWork(r.Context(), ns, candidate, spec, annotations); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				continue
+			}
+			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("create work failed: %v", err)})
+			return
+		}
+		workName = candidate
+		break
+	}
+	if workName == "" {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "create work failed: could not allocate unique work name"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"workName":    workName,
+		"artifactUrl": artifactURL(s.artifactBaseURL, workName),
+		"parentWork":  req.ParentWork,
+	})
+}
+
+func resolveNamespace(raw, fallback string) string {
+	ns := strings.TrimSpace(raw)
+	if ns != "" {
+		return ns
+	}
+	return fallback
+}
+
+func resolveGrantName(raw, fallback string) string {
+	grantName := strings.TrimSpace(raw)
+	if grantName == "" {
+		grantName = strings.TrimSpace(fallback)
+	}
+	return strings.TrimSpace(grantName)
+}
+
+func workAnnotations(prompt, parentWork string) map[string]interface{} {
+	annotations := map[string]interface{}{}
+	if v := userPromptAnnotationValue(prompt); v != "" {
+		annotations[userPromptAnnotationKey] = v
+	}
+	if parent := strings.TrimSpace(parentWork); parent != "" {
+		annotations[followupOfAnnotationKey] = parent
+	}
+	if len(annotations) == 0 {
+		return nil
+	}
+	return annotations
+}
+
+func (s *server) createWork(ctx context.Context, namespace, name string, spec map[string]interface{}, annotations map[string]interface{}) error {
+	metadata := map[string]interface{}{
+		"name": name,
+	}
+	if len(annotations) > 0 {
+		metadata["annotations"] = annotations
+	}
+
+	obj := &unstructured.Unstructured{
+		Object: map[string]interface{}{
+			"apiVersion": "nereid.yuiseki.net/v1alpha1",
+			"kind":       "Work",
+			"metadata":   metadata,
+			"spec":       spec,
+		},
+	}
+
+	_, err := s.dynamic.Resource(workGVR).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
+	return err
+}
+
+func composeAgentPrompt(prompt, parentWork, followupContext string) string {
+	prompt = strings.TrimSpace(prompt)
+	parentWork = strings.TrimSpace(parentWork)
+	followupContext = strings.TrimSpace(followupContext)
+	if followupContext != "" && len([]byte(followupContext)) > maxFollowupContextBytes {
+		followupContext = strings.TrimSpace(string([]byte(followupContext)[:maxFollowupContextBytes]))
+	}
+
+	if parentWork == "" && followupContext == "" {
+		return prompt
+	}
+
+	var b strings.Builder
+	b.WriteString("This is a follow-up request.")
+	if parentWork != "" {
+		b.WriteString(" Previous work: ")
+		b.WriteString(parentWork)
+		b.WriteString(".")
+	}
+	b.WriteString("\n\n")
+	if followupContext != "" {
+		b.WriteString("Previous context:\n")
+		b.WriteString(followupContext)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("New instruction:\n")
+	b.WriteString(prompt)
+	return b.String()
+}
+
+func buildGeminiAgentSpec(prompt string) map[string]interface{} {
+	return map[string]interface{}{
+		"kind":  "agent.cli.v1",
+		"title": geminiAgentTitle(prompt),
+		"agent": map[string]interface{}{
+			"image":  "node:22-bookworm-slim",
+			"script": geminiAgentScript(),
+		},
+		"constraints": map[string]interface{}{
+			"deadlineSeconds": int64(1800),
+		},
+		"artifacts": map[string]interface{}{
+			"layout": "files",
+		},
+	}
+}
+
+func geminiAgentTitle(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "Gemini CLI task"
+	}
+	rs := []rune(prompt)
+	if len(rs) > 64 {
+		rs = rs[:64]
+	}
+	title := strings.TrimSpace(string(rs))
+	if title == "" {
+		return "Gemini CLI task"
+	}
+	return "Gemini CLI: " + title
+}
+
+func geminiAgentScript() string {
+	return `set -eu
+OUT_DIR="${NEREID_ARTIFACT_DIR:-/artifacts/${NEREID_WORK_NAME:-work}}"
+mkdir -p "${OUT_DIR}"
+PROMPT_FILE="${OUT_DIR}/user-input.txt"
+OUT_TEXT="${OUT_DIR}/gemini-output.txt"
+
+if [ ! -s "${PROMPT_FILE}" ]; then
+  printf '%s\n' "No user prompt found in ${PROMPT_FILE}" > "${OUT_TEXT}"
+  cat "${OUT_TEXT}"
+  exit 2
+fi
+
+if [ -z "${GEMINI_API_KEY:-}" ]; then
+  printf '%s\n' "GEMINI_API_KEY is required for Gemini CLI execution." > "${OUT_TEXT}"
+  cat "${OUT_TEXT}"
+  exit 2
+fi
+
+set +e
+npx -y @google/gemini-cli -p "$(cat "${PROMPT_FILE}")" --output-format text --approval-mode yolo > "${OUT_TEXT}" 2>&1
+status=$?
+set -e
+
+cat > "${OUT_DIR}/index.html" <<'HTML'
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>NEREID Gemini CLI</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #f7fafc; color: #1f2d3d; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      .wrap { max-width: 1200px; margin: 0 auto; padding: 14px; }
+      h1 { margin: 0 0 10px 0; font-size: 16px; }
+      pre { white-space: pre-wrap; word-break: break-word; background: #fff; border: 1px solid #d5deea; border-radius: 10px; padding: 12px; min-height: 50vh; }
+      .meta { margin: 0 0 10px 0; font-size: 12px; color: #355a83; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Gemini CLI Output</h1>
+      <div class="meta"><a href="./gemini-output.txt">gemini-output.txt</a></div>
+      <pre id="out">Loading...</pre>
+    </div>
+    <script>
+      fetch("./gemini-output.txt?ts=" + Date.now(), { cache: "no-store" })
+        .then((r) => r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status)))
+        .then((t) => { document.getElementById("out").textContent = t || "(empty)"; })
+        .catch((e) => { document.getElementById("out").textContent = "load failed: " + e.message; });
+    </script>
+  </body>
+</html>
+HTML
+
+cat "${OUT_TEXT}"
+exit "${status}"
+`
 }
 
 func (s *server) resolvePlannerFromGrant(ctx context.Context, namespace, grantName string, wantKey bool) (plannerCredentials, []string, error) {
@@ -752,6 +986,16 @@ func extractJSONText(s string) string {
 
 func normalizePlannedSpec(spec map[string]interface{}) {
 	kind, _ := spec["kind"].(string)
+	switch kind {
+	case "maplibre.style.v1":
+		normalizeMapLibrePlannedSpec(spec)
+	case "agent.cli.v1":
+		normalizeAgentCLIPlannedSpec(spec)
+	}
+}
+
+func normalizeMapLibrePlannedSpec(spec map[string]interface{}) {
+	kind, _ := spec["kind"].(string)
 	if kind != "maplibre.style.v1" {
 		return
 	}
@@ -786,6 +1030,127 @@ func normalizePlannedSpec(spec map[string]interface{}) {
 	case "uri", "link", "https", "http":
 		sourceStyle["mode"] = "url"
 	}
+}
+
+func normalizeAgentCLIPlannedSpec(spec map[string]interface{}) {
+	agent, _ := spec["agent"].(map[string]interface{})
+	if agent == nil {
+		return
+	}
+	normalizeStringArrayField(agent, "command")
+	normalizeStringArrayField(agent, "args")
+}
+
+func normalizeStringArrayField(obj map[string]interface{}, field string) {
+	raw, ok := obj[field]
+	if !ok || raw == nil {
+		return
+	}
+
+	switch v := raw.(type) {
+	case string:
+		ss := parseStringArray(v)
+		if len(ss) == 0 {
+			return
+		}
+		out := make([]interface{}, 0, len(ss))
+		for _, s := range ss {
+			out = append(out, s)
+		}
+		obj[field] = out
+	case []string:
+		out := make([]interface{}, 0, len(v))
+		for _, s := range v {
+			out = append(out, s)
+		}
+		obj[field] = out
+	}
+}
+
+func parseStringArray(input string) []string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+
+	if strings.HasPrefix(input, "[") && strings.HasSuffix(input, "]") {
+		var arr []string
+		if err := json.Unmarshal([]byte(input), &arr); err == nil {
+			out := make([]string, 0, len(arr))
+			for _, s := range arr {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+
+	if strings.ContainsAny(input, ",\n") {
+		parts := strings.FieldsFunc(input, func(r rune) bool {
+			return r == ',' || r == '\n'
+		})
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+
+	return shellSplit(input)
+}
+
+func shellSplit(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+
+	var out []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+	escaping := false
+
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		out = append(out, cur.String())
+		cur.Reset()
+	}
+
+	for _, r := range s {
+		switch {
+		case escaping:
+			cur.WriteRune(r)
+			escaping = false
+		case r == '\\' && !inSingle:
+			escaping = true
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+
+	if escaping {
+		cur.WriteByte('\\')
+	}
+	flush()
+	return out
 }
 
 func validatePlannedSpec(spec map[string]interface{}) error {

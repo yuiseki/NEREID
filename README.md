@@ -80,6 +80,7 @@ WORK_NAME=$(./bin/nereid submit examples/works/codex-cli.yaml -n nereid -o name 
 - `spec.agent.image` (required)
 - `spec.agent.script` (shell script)
 - `spec.agent.command` + `spec.agent.args` (array-of-strings command mode)
+- Playground UI submits Gemini tasks via `/api/submit-agent` and `/embed` provides follow-up submission.
 
 The controller injects `NEREID_WORK_NAME` and `NEREID_ARTIFACT_DIR` into the container, and also applies `Grant.spec.env`, so API keys such as `OPENAI_API_KEY` / `GEMINI_API_KEY` can be passed safely via Secret refs.
 
@@ -140,6 +141,15 @@ Important values:
 - `artifacts.servicePort=8080`
 - `artifacts.ingress.host=nereid-artifacts.yuiseki.com`
 - `artifacts.publicBaseUrl=https://nereid-artifacts.yuiseki.com`
+- `grants.default.geminiSecretName=nereid-gemini` (default)
+
+Gemini CLI credentials for workloads:
+
+```bash
+kubectl -n nereid create secret generic nereid-gemini \
+  --from-literal=api-key="$GEMINI_API_KEY" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
 
 ## Cloudflared Example
 

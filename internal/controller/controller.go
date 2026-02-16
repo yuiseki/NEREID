@@ -173,7 +173,7 @@ func (c *Controller) reconcileWork(ctx context.Context, work *unstructured.Unstr
 			return c.updateWorkStatus(ctx, work, "Error", buildErr.Error(), "")
 		}
 		if grant != nil {
-			if applyErr := c.applyGrantToJob(newJob, grant); applyErr != nil {
+			if applyErr := c.applyGrantToJob(ctx, newJob, grant); applyErr != nil {
 				return c.updateWorkStatus(ctx, work, "Error", applyErr.Error(), "")
 			}
 		}
@@ -1658,7 +1658,7 @@ func workUserPrompt(work *unstructured.Unstructured) string {
 	return strings.TrimSpace(annotations[userPromptAnnotationKey])
 }
 
-func (c *Controller) applyGrantToJob(job *batchv1.Job, grant *unstructured.Unstructured) error {
+func (c *Controller) applyGrantToJob(ctx context.Context, job *batchv1.Job, grant *unstructured.Unstructured) error {
 	if job == nil || grant == nil {
 		return nil
 	}
@@ -1746,7 +1746,7 @@ func (c *Controller) applyGrantToJob(job *batchv1.Job, grant *unstructured.Unstr
 		container.Resources.Limits[corev1.ResourceMemory] = q
 	}
 
-	envVars, err := grantEnvVars(grant)
+	envVars, err := grantEnvVars(ctx, c.kube, grant)
 	if err != nil {
 		return err
 	}
@@ -1768,11 +1768,12 @@ func (c *Controller) applyGrantToJob(job *batchv1.Job, grant *unstructured.Unstr
 	return nil
 }
 
-func grantEnvVars(grant *unstructured.Unstructured) ([]corev1.EnvVar, error) {
+func grantEnvVars(ctx context.Context, kube kubernetes.Interface, grant *unstructured.Unstructured) ([]corev1.EnvVar, error) {
 	if grant == nil {
 		return nil, nil
 	}
 	grantName := grant.GetName()
+	grantNamespace := strings.TrimSpace(grant.GetNamespace())
 	raw, found, err := unstructured.NestedSlice(grant.Object, "spec", "env")
 	if err != nil {
 		return nil, fmt.Errorf("failed to read grant %q spec.env: %v", grantName, err)
@@ -1807,21 +1808,39 @@ func grantEnvVars(grant *unstructured.Unstructured) ([]corev1.EnvVar, error) {
 				return nil, fmt.Errorf("grant %q spec.env[%d].secretKeyRef.name and key are required", grantName, i)
 			}
 
-			var optional *bool
+			optional := false
 			if ov, ok := skr["optional"].(bool); ok {
-				optional = &ov
+				optional = ov
 			}
 
-			out = append(out, corev1.EnvVar{
-				Name: name,
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: sec},
-						Key:                  key,
-						Optional:             optional,
-					},
-				},
-			})
+			if kube == nil {
+				return nil, fmt.Errorf("grant %q requires secretKeyRef for env %q, but kube client is nil", grantName, name)
+			}
+			if grantNamespace == "" {
+				return nil, fmt.Errorf("grant %q namespace is required to resolve secretKeyRef for env %q", grantName, name)
+			}
+			secret, getErr := kube.CoreV1().Secrets(grantNamespace).Get(ctx, sec, metav1.GetOptions{})
+			if getErr != nil {
+				if apierrors.IsNotFound(getErr) && optional {
+					continue
+				}
+				return nil, fmt.Errorf("grant %q env %q get secret %s/%s failed: %v", grantName, name, grantNamespace, sec, getErr)
+			}
+			if secret.Data == nil {
+				if optional {
+					continue
+				}
+				return nil, fmt.Errorf("grant %q env %q secret %s/%s has no data", grantName, name, grantNamespace, sec)
+			}
+			v, ok := secret.Data[key]
+			if !ok {
+				if optional {
+					continue
+				}
+				return nil, fmt.Errorf("grant %q env %q secret %s/%s missing key %q", grantName, name, grantNamespace, sec, key)
+			}
+
+			out = append(out, corev1.EnvVar{Name: name, Value: string(v)})
 			continue
 		}
 

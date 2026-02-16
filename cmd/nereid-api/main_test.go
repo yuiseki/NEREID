@@ -91,6 +91,39 @@ func TestValidatePlannedSpecRejectsAgentCLIWithoutScriptOrCommand(t *testing.T) 
 	}
 }
 
+func TestNormalizePlannedSpecConvertsAgentCommandFromString(t *testing.T) {
+	spec := map[string]interface{}{
+		"kind":  "agent.cli.v1",
+		"title": "agent",
+		"agent": map[string]interface{}{
+			"image":   "node:22-bookworm-slim",
+			"command": `npx -y "@google/gemini-cli" --help`,
+		},
+	}
+
+	normalizePlannedSpec(spec)
+	if err := validatePlannedSpec(spec); err != nil {
+		t.Fatalf("validatePlannedSpec() after normalize error = %v", err)
+	}
+}
+
+func TestNormalizePlannedSpecConvertsAgentArgsFromJSONString(t *testing.T) {
+	spec := map[string]interface{}{
+		"kind":  "agent.cli.v1",
+		"title": "agent",
+		"agent": map[string]interface{}{
+			"image":   "node:22-bookworm-slim",
+			"command": "npx",
+			"args":    `["-y","@google/gemini-cli","--version"]`,
+		},
+	}
+
+	normalizePlannedSpec(spec)
+	if err := validatePlannedSpec(spec); err != nil {
+		t.Fatalf("validatePlannedSpec() after normalize error = %v", err)
+	}
+}
+
 func TestUserPromptAnnotationValueTrimsAndTruncates(t *testing.T) {
 	in := strings.Repeat("x", maxUserPromptBytes+100)
 	got := userPromptAnnotationValue("  " + in + "  ")
@@ -105,5 +138,18 @@ func TestUserPromptAnnotationValueTrimsAndTruncates(t *testing.T) {
 func TestUserPromptAnnotationValueEmpty(t *testing.T) {
 	if got := userPromptAnnotationValue("   "); got != "" {
 		t.Fatalf("userPromptAnnotationValue() got=%q want empty", got)
+	}
+}
+
+func TestComposeAgentPromptIncludesParentAndContext(t *testing.T) {
+	got := composeAgentPrompt("next instruction", "work-123", "previous logs")
+	if !strings.Contains(got, "work-123") {
+		t.Fatalf("composeAgentPrompt() missing parent work: %q", got)
+	}
+	if !strings.Contains(got, "previous logs") {
+		t.Fatalf("composeAgentPrompt() missing follow-up context: %q", got)
+	}
+	if !strings.Contains(got, "next instruction") {
+		t.Fatalf("composeAgentPrompt() missing new prompt: %q", got)
 	}
 }

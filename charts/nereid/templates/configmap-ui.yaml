@@ -358,6 +358,32 @@ data:
             max-height: 42vh;
             overflow: auto;
           }
+          .embed-followup {
+            margin-top: 10px;
+            padding-top: 10px;
+            border-top: 1px dashed #d4e2f2;
+          }
+          .embed-followup textarea {
+            width: 100%;
+            min-height: 86px;
+            resize: vertical;
+            border: 1px solid #c9d8eb;
+            border-radius: 8px;
+            padding: 8px;
+            font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            background: #f8fbff;
+            color: #1f2d3d;
+            box-sizing: border-box;
+          }
+          .embed-followup .toolbar {
+            margin-top: 8px;
+          }
+          .embed-followup .status {
+            margin-top: 6px;
+            min-height: 16px;
+            font-size: 12px;
+            color: #355a83;
+          }
           .embed-frame-wrap {
             background: #fff;
             border: 1px solid var(--line);
@@ -445,6 +471,14 @@ data:
               <pre id="embed-dialogue">Waiting...</pre>
               <h3>Agent Log</h3>
               <pre id="embed-agent">Waiting...</pre>
+              <div class="embed-followup" id="embed-followup">
+                <h3>Follow-up Instruction</h3>
+                <textarea id="followup-input" placeholder="追加の指示を入力してください。"></textarea>
+                <div class="toolbar">
+                  <button type="button" id="followup-btn">Send Follow-up</button>
+                </div>
+                <div id="followup-status" class="status mono"></div>
+              </div>
             </aside>
             <div class="embed-frame-wrap">
               <iframe id="embed-frame" loading="lazy" referrerpolicy="no-referrer"></iframe>
@@ -479,6 +513,10 @@ data:
           const embedUserEl = document.getElementById("embed-user");
           const embedDialogueEl = document.getElementById("embed-dialogue");
           const embedAgentEl = document.getElementById("embed-agent");
+          const embedFollowupEl = document.getElementById("embed-followup");
+          const followupInputEl = document.getElementById("followup-input");
+          const followupBtnEl = document.getElementById("followup-btn");
+          const followupStatusEl = document.getElementById("followup-status");
           const rawArtifactsBase = "{{ .Values.artifacts.publicBaseUrl }}".replace(/\/+$/, "");
           const pageIsHTTPS = window.location.protocol === "https:";
           const defaultArtifactsBase = pageIsHTTPS ? rawArtifactsBase.replace(/^http:\/\//i, "https://") : rawArtifactsBase;
@@ -524,6 +562,34 @@ data:
             }
           }
 
+          function escapeHTML(s) {
+            return String(s || "")
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+          }
+
+          function setEmbedFrameWaiting(message) {
+            const body = escapeHTML(message || "Waiting for artifact...");
+            embedFrameEl.removeAttribute("src");
+            embedFrameEl.srcdoc = "<!doctype html><html><body style=\"margin:0;display:grid;place-items:center;height:100%;font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace;color:#355a83;background:#f5f8fc;\">"
+              + "<div>" + body + "</div></body></html>";
+          }
+
+          function readEmbedText(el) {
+            if (!el) return "";
+            const t = String(el.textContent || "").trim();
+            if (!t || t === "(not found yet)" || t === "(empty)" || t === "Waiting...") return "";
+            return t;
+          }
+
+          function setFollowupBusy(busy) {
+            if (!followupBtnEl || !followupInputEl) return;
+            followupBtnEl.disabled = busy;
+            followupInputEl.disabled = busy;
+            followupBtnEl.textContent = busy ? "Submitting..." : "Send Follow-up";
+          }
+
           async function initEmbedMode() {
             if (playgroundShellEl) playgroundShellEl.style.display = "none";
             if (embedShellEl) embedShellEl.style.display = "block";
@@ -544,21 +610,107 @@ data:
               embedUserEl.textContent = "";
               embedDialogueEl.textContent = "";
               embedAgentEl.textContent = "";
+              if (embedFollowupEl) embedFollowupEl.style.display = "none";
               if (embedOpenEl) embedOpenEl.style.display = "none";
               return;
             }
 
-            embedFrameEl.src = artifactUrl;
+            let frameReady = false;
+            setEmbedFrameWaiting("Waiting for artifact...");
             if (workName) {
               embedOpenEl.style.display = "";
               embedOpenEl.href = embedURLForWork(workName);
               embedOpenEl.textContent = "Open Embed";
+              if (embedFollowupEl) embedFollowupEl.style.display = "";
             } else {
               embedOpenEl.style.display = "none";
+              if (embedFollowupEl) embedFollowupEl.style.display = "none";
+              embedFrameEl.removeAttribute("srcdoc");
+              embedFrameEl.src = artifactUrl;
+              frameReady = true;
             }
             embedMetaEl.textContent = workName ? ("Work: " + workName + " (loading...)") : "Loading artifact...";
 
+            if (workName && followupBtnEl && followupInputEl) {
+              followupBtnEl.onclick = async () => {
+                const prompt = followupInputEl.value.trim();
+                if (!prompt) {
+                  if (followupStatusEl) followupStatusEl.textContent = "Please input follow-up text.";
+                  return;
+                }
+                const contextParts = [];
+                const userText = readEmbedText(embedUserEl);
+                const dialogueText = readEmbedText(embedDialogueEl);
+                const agentText = readEmbedText(embedAgentEl);
+                if (userText) contextParts.push("[USER]\n" + userText);
+                if (dialogueText) contextParts.push("[DIALOGUE]\n" + dialogueText);
+                if (agentText) contextParts.push("[AGENT LOG]\n" + agentText);
+                const followupContext = contextParts.join("\n\n");
+
+                setFollowupBusy(true);
+                if (followupStatusEl) followupStatusEl.textContent = "Submitting follow-up...";
+                try {
+                  const res = await fetch("/api/submit-agent", {
+                    method: "POST",
+                    cache: "no-store",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      prompt,
+                      parentWork: workName,
+                      followupContext
+                    })
+                  });
+                  const j = await res.json();
+                  if (!res.ok) throw new Error(j.error || ("submit failed: " + res.status));
+                  if (followupStatusEl) followupStatusEl.textContent = "Submitted. Opening next work...";
+                  window.location.href = embedURLForWork(j.workName);
+                } catch (e) {
+                  if (followupStatusEl) followupStatusEl.textContent = "Error: " + e.message;
+                  setFollowupBusy(false);
+                }
+              };
+            }
+
             const refresh = async () => {
+              let phase = "";
+              let message = "";
+              if (workName) {
+                try {
+                  const st = await fetchStatus(workName);
+                  phase = st.phase || "Submitted";
+                  message = st.message || "";
+                  const statusArtifact = normalizeArtifactUrl(st.artifactUrl || "");
+                  if (statusArtifact) artifactUrl = statusArtifact;
+                  embedMetaEl.textContent = "Work: " + workName + " / phase=" + phase + (message ? (" / " + message) : "");
+                } catch (e) {
+                  embedMetaEl.textContent = "Work: " + workName + " / status error: " + e.message;
+                }
+              }
+
+              if (!frameReady && workName) {
+                if (phase === "Succeeded") {
+                  embedFrameEl.removeAttribute("srcdoc");
+                  embedFrameEl.src = artifactUrl;
+                  frameReady = true;
+                } else if (phase === "Failed" || phase === "Error") {
+                  setEmbedFrameWaiting("Work failed before artifact became available.");
+                } else if (phase === "Running") {
+                  setEmbedFrameWaiting("Work is running. Opening artifact when ready...");
+                } else if (phase === "Queued" || phase === "Submitted") {
+                  setEmbedFrameWaiting("Work submitted. Waiting for queue admission...");
+                } else {
+                  setEmbedFrameWaiting("Waiting for work status...");
+                }
+              }
+
+              const canReadArtifacts = !workName || phase === "Succeeded" || phase === "Failed" || phase === "Error";
+              if (!canReadArtifacts) {
+                embedUserEl.textContent = "(not found yet)";
+                embedDialogueEl.textContent = "(not found yet)";
+                embedAgentEl.textContent = "(not found yet)";
+                return;
+              }
+
               const user = await fetchText(artifactUrl + "user-input.txt");
               const dialogue = await fetchText(artifactUrl + "dialogue.txt");
               const agent = await fetchText(artifactUrl + "agent.log");
@@ -566,17 +718,6 @@ data:
               embedUserEl.textContent = user === null ? "(not found yet)" : (user || "(empty)");
               embedDialogueEl.textContent = dialogue === null ? "(not found yet)" : (dialogue || "(empty)");
               embedAgentEl.textContent = agent === null ? "(not found yet)" : (agent || "(empty)");
-
-              if (workName) {
-                try {
-                  const st = await fetchStatus(workName);
-                  const phase = st.phase || "Unknown";
-                  const msg = st.message || "";
-                  embedMetaEl.textContent = "Work: " + workName + " / phase=" + phase + (msg ? (" / " + msg) : "");
-                } catch (e) {
-                  embedMetaEl.textContent = "Work: " + workName + " / status error: " + e.message;
-                }
-              }
             };
 
             await refresh();
@@ -725,7 +866,7 @@ data:
               artifactEl.textContent = "";
 
               try {
-                const res = await fetch("/api/submit", {
+                const res = await fetch("/api/submit-agent", {
                   method: "POST",
                   cache: "no-store",
                   headers: { "Content-Type": "application/json" },

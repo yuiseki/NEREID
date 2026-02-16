@@ -50,8 +50,8 @@ grants:
     openaiSecretName: "nereid-openai"
     openaiSecretKey: "api-key"
     openaiSecretOptional: true
-    # Optional: set to inject GEMINI_API_KEY in the default Grant.
-    geminiSecretName: ""
+    # Default secret to inject GEMINI_API_KEY for Gemini CLI workloads.
+    geminiSecretName: "nereid-gemini"
     geminiSecretKey: "api-key"
     geminiSecretOptional: true
 

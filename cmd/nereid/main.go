@@ -604,6 +604,16 @@ func parsePlannerWorks(content string) ([]instructionWorkPlan, error) {
 
 func normalizePlannedSpec(spec map[string]interface{}) {
 	kind, _ := spec["kind"].(string)
+	switch kind {
+	case "maplibre.style.v1":
+		normalizeMapLibrePlannedSpec(spec)
+	case "agent.cli.v1":
+		normalizeAgentCLIPlannedSpec(spec)
+	}
+}
+
+func normalizeMapLibrePlannedSpec(spec map[string]interface{}) {
+	kind, _ := spec["kind"].(string)
 	if kind != "maplibre.style.v1" {
 		return
 	}
@@ -642,6 +652,127 @@ func normalizePlannedSpec(spec map[string]interface{}) {
 	case "uri", "link", "https", "http":
 		sourceStyle["mode"] = "url"
 	}
+}
+
+func normalizeAgentCLIPlannedSpec(spec map[string]interface{}) {
+	agent, _ := spec["agent"].(map[string]interface{})
+	if agent == nil {
+		return
+	}
+	normalizeStringArrayField(agent, "command")
+	normalizeStringArrayField(agent, "args")
+}
+
+func normalizeStringArrayField(obj map[string]interface{}, field string) {
+	raw, ok := obj[field]
+	if !ok || raw == nil {
+		return
+	}
+
+	switch v := raw.(type) {
+	case string:
+		ss := parseStringArray(v)
+		if len(ss) == 0 {
+			return
+		}
+		out := make([]interface{}, 0, len(ss))
+		for _, s := range ss {
+			out = append(out, s)
+		}
+		obj[field] = out
+	case []string:
+		out := make([]interface{}, 0, len(v))
+		for _, s := range v {
+			out = append(out, s)
+		}
+		obj[field] = out
+	}
+}
+
+func parseStringArray(input string) []string {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return nil
+	}
+
+	if strings.HasPrefix(input, "[") && strings.HasSuffix(input, "]") {
+		var arr []string
+		if err := json.Unmarshal([]byte(input), &arr); err == nil {
+			out := make([]string, 0, len(arr))
+			for _, s := range arr {
+				s = strings.TrimSpace(s)
+				if s != "" {
+					out = append(out, s)
+				}
+			}
+			if len(out) > 0 {
+				return out
+			}
+		}
+	}
+
+	if strings.ContainsAny(input, ",\n") {
+		parts := strings.FieldsFunc(input, func(r rune) bool {
+			return r == ',' || r == '\n'
+		})
+		out := make([]string, 0, len(parts))
+		for _, p := range parts {
+			p = strings.TrimSpace(p)
+			if p != "" {
+				out = append(out, p)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+
+	return shellSplit(input)
+}
+
+func shellSplit(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+
+	var out []string
+	var cur strings.Builder
+	inSingle := false
+	inDouble := false
+	escaping := false
+
+	flush := func() {
+		if cur.Len() == 0 {
+			return
+		}
+		out = append(out, cur.String())
+		cur.Reset()
+	}
+
+	for _, r := range s {
+		switch {
+		case escaping:
+			cur.WriteRune(r)
+			escaping = false
+		case r == '\\' && !inSingle:
+			escaping = true
+		case r == '\'' && !inDouble:
+			inSingle = !inSingle
+		case r == '"' && !inSingle:
+			inDouble = !inDouble
+		case (r == ' ' || r == '\t' || r == '\n') && !inSingle && !inDouble:
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+
+	if escaping {
+		cur.WriteByte('\\')
+	}
+	flush()
+	return out
 }
 
 func extractJSONText(s string) string {

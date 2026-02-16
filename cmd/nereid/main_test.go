@@ -270,6 +270,34 @@ func TestParsePlannerWorksAcceptsAgentCLIKind(t *testing.T) {
 	}
 }
 
+func TestParsePlannerWorksNormalizesAgentCommandString(t *testing.T) {
+	content := `{"works":[{"baseName":"agent-demo","spec":{"kind":"agent.cli.v1","title":"agent","agent":{"image":"node:22-bookworm-slim","command":"npx -y @google/gemini-cli --help"}}}]}`
+	plans, err := parsePlannerWorks(content)
+	if err != nil {
+		t.Fatalf("parsePlannerWorks() error = %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plan count mismatch got=%d want=1", len(plans))
+	}
+	if err := validatePlannedSpec(plans[0].spec); err != nil {
+		t.Fatalf("validatePlannedSpec() error = %v", err)
+	}
+}
+
+func TestParsePlannerWorksNormalizesAgentArgsJSONString(t *testing.T) {
+	content := `{"works":[{"baseName":"agent-demo","spec":{"kind":"agent.cli.v1","title":"agent","agent":{"image":"node:22-bookworm-slim","command":"npx","args":"[\"-y\",\"@google/gemini-cli\",\"--version\"]"}}}]}`
+	plans, err := parsePlannerWorks(content)
+	if err != nil {
+		t.Fatalf("parsePlannerWorks() error = %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plan count mismatch got=%d want=1", len(plans))
+	}
+	if err := validatePlannedSpec(plans[0].spec); err != nil {
+		t.Fatalf("validatePlannedSpec() error = %v", err)
+	}
+}
+
 func TestPlanWorksWithLLMUsesOpenAICompatibleEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {

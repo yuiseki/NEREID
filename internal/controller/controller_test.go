@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"context"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -11,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestMakeJobNameStableAndBounded(t *testing.T) {
@@ -477,6 +479,15 @@ func TestApplyGrantToJobOverridesQueueRuntimeResourcesAndEnv(t *testing.T) {
 			RuntimeClassName:  "gvisor",
 			ArtifactsHostPath: "/var/lib/nereid/artifacts",
 		},
+		kube: fake.NewSimpleClientset(&corev1.Secret{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "openai",
+				Namespace: "nereid",
+			},
+			Data: map[string][]byte{
+				"api-key": []byte("secret-value"),
+			},
+		}),
 	}
 
 	job, err := c.buildJob(work, "work-overpass-sample", "overpassql.map.v1")
@@ -518,7 +529,7 @@ func TestApplyGrantToJobOverridesQueueRuntimeResourcesAndEnv(t *testing.T) {
 		},
 	}}
 
-	if err := c.applyGrantToJob(job, grant); err != nil {
+	if err := c.applyGrantToJob(context.Background(), job, grant); err != nil {
 		t.Fatalf("applyGrantToJob() error = %v", err)
 	}
 
@@ -553,11 +564,11 @@ func TestApplyGrantToJobOverridesQueueRuntimeResourcesAndEnv(t *testing.T) {
 			continue
 		}
 		found = true
-		if ev.ValueFrom == nil || ev.ValueFrom.SecretKeyRef == nil {
-			t.Fatalf("OPENAI_API_KEY should come from secretKeyRef, got=%+v", ev)
+		if ev.ValueFrom != nil {
+			t.Fatalf("OPENAI_API_KEY should be resolved to a literal value, got=%+v", ev)
 		}
-		if ev.ValueFrom.SecretKeyRef.Name != "openai" || ev.ValueFrom.SecretKeyRef.Key != "api-key" {
-			t.Fatalf("secretKeyRef mismatch got=%s/%s", ev.ValueFrom.SecretKeyRef.Name, ev.ValueFrom.SecretKeyRef.Key)
+		if ev.Value != "secret-value" {
+			t.Fatalf("OPENAI_API_KEY value mismatch got=%q want=%q", ev.Value, "secret-value")
 		}
 	}
 	if !found {
