@@ -342,6 +342,9 @@ func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {
 		"metadata": map[string]interface{}{
 			"name":      "agent-cli-sample",
 			"namespace": "nereid",
+			"annotations": map[string]interface{}{
+				userPromptAnnotationKey: "東京都台東区の公園を表示してください。",
+			},
 		},
 		"spec": map[string]interface{}{
 			"kind":  "agent.cli.v1",
@@ -378,7 +381,10 @@ func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {
 		"NEREID_WORK_NAME",
 		"NEREID_ARTIFACT_DIR",
 		"command.txt",
+		"user-input.txt",
+		"dialogue.txt",
 		"agent.log",
+		"https://nereid.yuiseki.net/embed?work=agent-cli-sample",
 		"'@google/gemini-cli'",
 	} {
 		if !strings.Contains(script, needle) {

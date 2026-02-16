@@ -179,6 +179,13 @@ func TestRunPromptBuildsKubectlArgsAndGeneratedWork(t *testing.T) {
 	if gotName := meta["name"]; gotName != "20260215-0704-taito-parks" {
 		t.Fatalf("metadata.name mismatch got=%v", gotName)
 	}
+	annotations, _ := meta["annotations"].(map[string]interface{})
+	if annotations == nil {
+		t.Fatal("metadata.annotations should be set")
+	}
+	if gotPrompt := annotations[userPromptAnnotationKey]; gotPrompt != "東京都台東区の公園を表示してくだい。" {
+		t.Fatalf("metadata.annotations[%q] mismatch got=%v", userPromptAnnotationKey, gotPrompt)
+	}
 	spec := obj["spec"].(map[string]interface{})
 	if gotKind := spec["kind"]; gotKind != "overpassql.map.v1" {
 		t.Fatalf("spec.kind mismatch got=%v", gotKind)
@@ -419,6 +426,17 @@ func TestArtifactURLForWorkRespectsEnv(t *testing.T) {
 	want := "https://example.invalid/base/abc-123/"
 	if got != want {
 		t.Fatalf("artifactURLForWork() got=%q want=%q", got, want)
+	}
+}
+
+func TestUserPromptAnnotationValueTrimsAndTruncates(t *testing.T) {
+	in := strings.Repeat("x", maxUserPromptBytes+64)
+	got := userPromptAnnotationValue("  " + in + "  ")
+	if got == "" {
+		t.Fatal("userPromptAnnotationValue() returned empty")
+	}
+	if len([]byte(got)) != maxUserPromptBytes {
+		t.Fatalf("annotation length got=%d want=%d", len([]byte(got)), maxUserPromptBytes)
 	}
 }
 

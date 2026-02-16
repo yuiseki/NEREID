@@ -11,6 +11,9 @@ data:
       server_name _;
       root /usr/share/nginx/html;
       include /etc/nginx/mime.types;
+      add_header Access-Control-Allow-Origin "*" always;
+      add_header Access-Control-Allow-Methods "GET, HEAD, OPTIONS" always;
+      add_header Access-Control-Allow-Headers "*" always;
       types {
         text/plain log;
       }

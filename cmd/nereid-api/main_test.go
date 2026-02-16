@@ -1,6 +1,9 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestPlannerCredentialsFromEnvPrefersOpenAI(t *testing.T) {
 	t.Setenv("NEREID_OPENAI_API_KEY", "")
@@ -85,5 +88,22 @@ func TestValidatePlannedSpecRejectsAgentCLIWithoutScriptOrCommand(t *testing.T) 
 	}
 	if err := validatePlannedSpec(spec); err == nil {
 		t.Fatal("validatePlannedSpec() expected error, got nil")
+	}
+}
+
+func TestUserPromptAnnotationValueTrimsAndTruncates(t *testing.T) {
+	in := strings.Repeat("x", maxUserPromptBytes+100)
+	got := userPromptAnnotationValue("  " + in + "  ")
+	if got == "" {
+		t.Fatal("userPromptAnnotationValue() returned empty")
+	}
+	if len([]byte(got)) != maxUserPromptBytes {
+		t.Fatalf("annotation length got=%d want=%d", len([]byte(got)), maxUserPromptBytes)
+	}
+}
+
+func TestUserPromptAnnotationValueEmpty(t *testing.T) {
+	if got := userPromptAnnotationValue("   "); got != "" {
+		t.Fatalf("userPromptAnnotationValue() got=%q want empty", got)
 	}
 }

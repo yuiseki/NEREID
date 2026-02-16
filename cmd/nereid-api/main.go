@@ -52,6 +52,9 @@ type instructionWorkPlan struct {
 }
 
 const (
+	userPromptAnnotationKey = "nereid.yuiseki.net/user-prompt"
+	maxUserPromptBytes      = 16 * 1024
+
 	plannerProviderOpenAI = "openai"
 	plannerProviderGemini = "gemini"
 )
@@ -64,7 +67,7 @@ type plannerCredentials struct {
 func main() {
 	addr := envOr("NEREID_API_BIND", ":8080")
 	workNamespace := envOr("NEREID_WORK_NAMESPACE", "nereid")
-	artifactBaseURL := envOr("NEREID_ARTIFACT_BASE_URL", "http://nereid-artifacts.yuiseki.com")
+	artifactBaseURL := envOr("NEREID_ARTIFACT_BASE_URL", "https://nereid-artifacts.yuiseki.com")
 	defaultGrant := strings.TrimSpace(os.Getenv("NEREID_DEFAULT_GRANT"))
 	kubeconfig := os.Getenv("KUBECONFIG")
 
@@ -184,6 +187,7 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	now := time.Now().UTC()
 	workNames := make([]string, 0, len(plans))
 	artifactURLs := make([]string, 0, len(plans))
+	promptAnnotation := userPromptAnnotationValue(req.Prompt)
 	for i, p := range plans {
 		workName := buildTimestampedName(p.baseName, now.Add(time.Duration(i)*time.Second))
 
@@ -191,14 +195,21 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			p.spec["grantRef"] = map[string]interface{}{"name": grantName}
 		}
 
+		metadata := map[string]interface{}{
+			"name": workName,
+		}
+		if promptAnnotation != "" {
+			metadata["annotations"] = map[string]interface{}{
+				userPromptAnnotationKey: promptAnnotation,
+			}
+		}
+
 		obj := &unstructured.Unstructured{
 			Object: map[string]interface{}{
 				"apiVersion": "nereid.yuiseki.net/v1alpha1",
 				"kind":       "Work",
-				"metadata": map[string]interface{}{
-					"name": workName,
-				},
-				"spec": p.spec,
+				"metadata":   metadata,
+				"spec":       p.spec,
 			},
 		}
 
@@ -377,6 +388,18 @@ func writeJSON(w http.ResponseWriter, status int, v interface{}) {
 	w.Header().Set("Expires", "0")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+func userPromptAnnotationValue(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	b := []byte(prompt)
+	if len(b) <= maxUserPromptBytes {
+		return prompt
+	}
+	return strings.TrimSpace(string(b[:maxUserPromptBytes]))
 }
 
 func envOr(key, fallback string) string {

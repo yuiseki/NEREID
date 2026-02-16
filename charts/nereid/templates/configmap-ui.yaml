@@ -303,13 +303,85 @@ data:
             animation-play-state: paused;
             opacity: 0.45;
           }
+          .embed-shell {
+            width: 100vw;
+            min-height: 100vh;
+            margin: 0;
+            padding: 10px;
+          }
+          .embed-head {
+            display: flex;
+            gap: 10px;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+            background: rgba(255,255,255,0.92);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 8px 10px;
+          }
+          .embed-grid {
+            display: grid;
+            grid-template-columns: minmax(320px, 36vw) 1fr;
+            gap: 10px;
+            min-height: calc(100vh - 92px);
+          }
+          @media (max-width: 960px) {
+            .embed-grid { grid-template-columns: 1fr; min-height: auto; }
+          }
+          .embed-log {
+            background: #fff;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 10px;
+            overflow: auto;
+          }
+          .embed-log h3 {
+            margin: 0 0 6px 0;
+            font-size: 12px;
+            color: #355a83;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+          }
+          .embed-log pre {
+            margin: 0 0 10px 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+            font-size: 12px;
+            line-height: 1.45;
+            background: #f8fbff;
+            border: 1px solid #dbe6f4;
+            border-radius: 8px;
+            padding: 8px;
+            min-height: 96px;
+            max-height: 42vh;
+            overflow: auto;
+          }
+          .embed-frame-wrap {
+            background: #fff;
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            overflow: hidden;
+            min-height: 70vh;
+          }
+          #embed-frame {
+            width: 100%;
+            min-height: 70vh;
+            height: calc(100vh - 120px);
+            border: 0;
+            background: #f5f8fc;
+          }
+          @media (max-width: 960px) {
+            #embed-frame { height: 62vh; }
+          }
         </style>
       </head>
       <body>
-        <main class="shell">
+        <main class="shell" id="playground-shell">
           <section class="headline">
             <h1>NEREID</h1>
-            <p class="sub">Write what map you want. NEREID creates a Work, runs it, and opens the artifact when ready.</p>
+            <p class="sub">Write what map you want. NEREID creates a Work, runs it, and opens the result when ready.</p>
           </section>
 
           <section class="grid">
@@ -326,7 +398,7 @@ data:
             <aside class="card right">
               <div>
                 <span class="pill">Host: {{ .Values.host }}</span>
-                <span class="pill">Artifacts: {{ .Values.artifacts.publicBaseUrl }}</span>
+                <span class="pill">Runtime: k8s + Kueue</span>
                 <span class="pill">Grant: ∞</span>
               </div>
               <div class="status-stage" id="status-stage" data-mode="idle">
@@ -357,6 +429,29 @@ data:
           </section>
         </main>
 
+        <main class="embed-shell" id="embed-shell" style="display:none;">
+          <section class="embed-head">
+            <div>
+              <strong>NEREID Embed</strong>
+              <div id="embed-meta" class="mono"></div>
+            </div>
+            <a id="embed-open" class="ghost" target="_blank" rel="noopener noreferrer">Open Embed</a>
+          </section>
+          <section class="embed-grid">
+            <aside class="embed-log">
+              <h3>User Input</h3>
+              <pre id="embed-user">Waiting...</pre>
+              <h3>Agent Dialogue</h3>
+              <pre id="embed-dialogue">Waiting...</pre>
+              <h3>Agent Log</h3>
+              <pre id="embed-agent">Waiting...</pre>
+            </aside>
+            <div class="embed-frame-wrap">
+              <iframe id="embed-frame" loading="lazy" referrerpolicy="no-referrer"></iframe>
+            </div>
+          </section>
+        </main>
+
         <script>
           const form = document.getElementById("prompt-form");
           const input = document.getElementById("prompt-input");
@@ -376,6 +471,117 @@ data:
           let stageTicker = null;
           let workStartedAt = 0;
           let lastPhase = "Idle";
+          const playgroundShellEl = document.getElementById("playground-shell");
+          const embedShellEl = document.getElementById("embed-shell");
+          const embedFrameEl = document.getElementById("embed-frame");
+          const embedOpenEl = document.getElementById("embed-open");
+          const embedMetaEl = document.getElementById("embed-meta");
+          const embedUserEl = document.getElementById("embed-user");
+          const embedDialogueEl = document.getElementById("embed-dialogue");
+          const embedAgentEl = document.getElementById("embed-agent");
+          const rawArtifactsBase = "{{ .Values.artifacts.publicBaseUrl }}".replace(/\/+$/, "");
+          const pageIsHTTPS = window.location.protocol === "https:";
+          const defaultArtifactsBase = pageIsHTTPS ? rawArtifactsBase.replace(/^http:\/\//i, "https://") : rawArtifactsBase;
+          const isEmbedMode = window.location.pathname.replace(/\/+$/, "") === "/embed";
+
+          function normalizeArtifactUrl(raw) {
+            const v = String(raw || "").trim();
+            if (!v) return "";
+            if (v.startsWith("http://") || v.startsWith("https://")) {
+              const out = pageIsHTTPS ? v.replace(/^http:\/\//i, "https://") : v;
+              return out.endsWith("/") ? out : (out + "/");
+            }
+            return "";
+          }
+
+          function artifactUrlForWork(workName) {
+            if (!workName) return "";
+            return defaultArtifactsBase + "/" + encodeURIComponent(workName) + "/";
+          }
+
+          function embedURLForWork(workName) {
+            if (!workName) return "/embed";
+            return "/embed?work=" + encodeURIComponent(workName);
+          }
+
+          async function fetchStatus(workName) {
+            const ts = Date.now();
+            const res = await fetch("/api/status/" + encodeURIComponent(workName) + "?ts=" + ts, {
+              method: "GET",
+              cache: "no-store"
+            });
+            if (!res.ok) throw new Error("status API failed: " + res.status);
+            return await res.json();
+          }
+
+          async function fetchText(url) {
+            try {
+              const res = await fetch(url + "?ts=" + Date.now(), { cache: "no-store" });
+              if (!res.ok) return null;
+              return await res.text();
+            } catch (_) {
+              return null;
+            }
+          }
+
+          async function initEmbedMode() {
+            if (playgroundShellEl) playgroundShellEl.style.display = "none";
+            if (embedShellEl) embedShellEl.style.display = "block";
+
+            const params = new URLSearchParams(window.location.search);
+            const workName = (params.get("work") || "").trim();
+            let artifactUrl = normalizeArtifactUrl(params.get("artifact") || params.get("url"));
+
+            if (!artifactUrl && workName) {
+              try {
+                const st = await fetchStatus(workName);
+                artifactUrl = normalizeArtifactUrl(st.artifactUrl || "");
+              } catch (_) {}
+            }
+            if (!artifactUrl && workName) artifactUrl = artifactUrlForWork(workName);
+            if (!artifactUrl) {
+              embedMetaEl.textContent = "Use ?work=<work-name>.";
+              embedUserEl.textContent = "";
+              embedDialogueEl.textContent = "";
+              embedAgentEl.textContent = "";
+              if (embedOpenEl) embedOpenEl.style.display = "none";
+              return;
+            }
+
+            embedFrameEl.src = artifactUrl;
+            if (workName) {
+              embedOpenEl.style.display = "";
+              embedOpenEl.href = embedURLForWork(workName);
+              embedOpenEl.textContent = "Open Embed";
+            } else {
+              embedOpenEl.style.display = "none";
+            }
+            embedMetaEl.textContent = workName ? ("Work: " + workName + " (loading...)") : "Loading artifact...";
+
+            const refresh = async () => {
+              const user = await fetchText(artifactUrl + "user-input.txt");
+              const dialogue = await fetchText(artifactUrl + "dialogue.txt");
+              const agent = await fetchText(artifactUrl + "agent.log");
+
+              embedUserEl.textContent = user === null ? "(not found yet)" : (user || "(empty)");
+              embedDialogueEl.textContent = dialogue === null ? "(not found yet)" : (dialogue || "(empty)");
+              embedAgentEl.textContent = agent === null ? "(not found yet)" : (agent || "(empty)");
+
+              if (workName) {
+                try {
+                  const st = await fetchStatus(workName);
+                  const phase = st.phase || "Unknown";
+                  const msg = st.message || "";
+                  embedMetaEl.textContent = "Work: " + workName + " / phase=" + phase + (msg ? (" / " + msg) : "");
+                } catch (e) {
+                  embedMetaEl.textContent = "Work: " + workName + " / status error: " + e.message;
+                }
+              }
+            };
+
+            await refresh();
+            setInterval(refresh, 2500);
+          }
 
           function setBusy(busy) {
             submitBtn.disabled = busy;
@@ -485,13 +691,11 @@ data:
             }
             const j = await res.json();
             const phase = j.phase || "Submitted";
-            const artifact = j.artifactUrl || "";
             updateStage(phase, j.message || "");
-            statusEl.textContent = phase === "Succeeded" ? "Completed. Redirecting..." : "Work in progress... (" + phase + ")";
-            if (artifact) artifactEl.textContent = artifact;
-            if (phase === "Succeeded" && artifact) {
+            statusEl.textContent = phase === "Succeeded" ? "Completed. Redirecting to embed..." : "Work in progress... (" + phase + ")";
+            if (phase === "Succeeded") {
               stopAllTimers();
-              setTimeout(() => { window.location.href = artifact; }, 600);
+              setTimeout(() => { window.location.href = embedURLForWork(workName); }, 250);
             } else if (phase === "Failed" || phase === "Error") {
               stopAllTimers();
               setBusy(false);
@@ -499,76 +703,74 @@ data:
             }
           }
 
-          form.addEventListener("submit", async (ev) => {
-            ev.preventDefault();
-            stopAllTimers();
-            const prompt = input.value.trim();
-            if (!prompt) {
-              statusEl.textContent = "Please input text.";
-              return;
-            }
-            setBusy(true);
-            workStartedAt = Date.now();
-            updateStage("Submitted", "Submitting Work...");
-            startStageTicker();
-            statusEl.textContent = "Submitting Work...";
-            workNameEl.textContent = "";
-            artifactEl.textContent = "";
-
-            try {
-              const res = await fetch("/api/submit", {
-                method: "POST",
-                cache: "no-store",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ prompt })
-              });
-              const j = await res.json();
-              if (!res.ok) {
-                throw new Error(j.error || ("submit failed: " + res.status));
-              }
-              const workName = j.workName;
-              const artifact = j.artifactUrl || "";
-              workNameEl.textContent = "Work: " + workName;
-              if (artifact) artifactEl.textContent = artifact;
-              updateStage("Submitted", "Waiting for queue admit...");
-              statusEl.textContent = "Work in progress...";
-              pollTimer = setInterval(() => {
-                pollStatus(workName).catch((e) => {
-                  stopAllTimers();
-                  setBusy(false);
-                  updateStage("Error", e.message);
-                  statusEl.textContent = "Status check failed: " + e.message;
-                });
-              }, 2500);
-              await pollStatus(workName);
-            } catch (e) {
+          if (isEmbedMode) {
+            initEmbedMode().catch((e) => {
+              if (embedMetaEl) embedMetaEl.textContent = "Embed init failed: " + e.message;
+            });
+          } else {
+            form.addEventListener("submit", async (ev) => {
+              ev.preventDefault();
               stopAllTimers();
-              updateStage("Error", e.message);
-              statusEl.textContent = "Error: " + e.message;
+              const prompt = input.value.trim();
+              if (!prompt) {
+                statusEl.textContent = "Please input text.";
+                return;
+              }
+              setBusy(true);
+              workStartedAt = Date.now();
+              updateStage("Submitted", "Submitting Work...");
+              startStageTicker();
+              statusEl.textContent = "Submitting Work...";
+              workNameEl.textContent = "";
+              artifactEl.textContent = "";
+
+              try {
+                const res = await fetch("/api/submit", {
+                  method: "POST",
+                  cache: "no-store",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ prompt })
+                });
+                const j = await res.json();
+                if (!res.ok) {
+                  throw new Error(j.error || ("submit failed: " + res.status));
+                }
+                const workName = j.workName;
+                workNameEl.textContent = "Work: " + workName;
+                artifactEl.textContent = "Redirecting to /embed...";
+                updateStage("Submitted", "Submitted. Opening embed...");
+                statusEl.textContent = "Work in progress... (Submitted)";
+                window.location.href = embedURLForWork(workName);
+                return;
+              } catch (e) {
+                stopAllTimers();
+                updateStage("Error", e.message);
+                statusEl.textContent = "Error: " + e.message;
+                setBusy(false);
+              }
+            });
+
+            clearBtn.addEventListener("click", () => {
+              input.value = "";
+              statusEl.textContent = "Ready.";
+              workNameEl.textContent = "";
+              artifactEl.textContent = "";
+              workStartedAt = 0;
+              updateStage("Idle", "");
+              stopAllTimers();
               setBusy(false);
-            }
-          });
-
-          clearBtn.addEventListener("click", () => {
-            input.value = "";
-            statusEl.textContent = "Ready.";
-            workNameEl.textContent = "";
-            artifactEl.textContent = "";
-            workStartedAt = 0;
-            updateStage("Idle", "");
-            stopAllTimers();
-            setBusy(false);
-            input.focus();
-          });
-
-          document.querySelectorAll(".eg").forEach((btn) => {
-            btn.addEventListener("click", () => {
-              input.value = btn.textContent.trim();
               input.focus();
             });
-          });
 
-          updateStage("Idle", "");
+            document.querySelectorAll(".eg").forEach((btn) => {
+              btn.addEventListener("click", () => {
+                input.value = btn.textContent.trim();
+                input.focus();
+              });
+            });
+
+            updateStage("Idle", "");
+          }
         </script>
       </body>
     </html>

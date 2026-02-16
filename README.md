@@ -28,7 +28,7 @@ For multi-usecase expansion, use `Work` + `nereid-controller` (kind-based job ge
 `cmd/nereid` is a thin kubectl wrapper.
 
 `submit` always rewrites `metadata.name` to include the current UTC timestamp prefix (`YYYYMMDD-HHMM-title`) and uses `kubectl create`, so repeated submissions do not overwrite previous `Work` objects.
-After successful submit, it also prints `artifactUrl=http://nereid-artifacts.yuiseki.com/<work>/` for easier human/agent logs.
+After successful submit, it also prints `artifactUrl=https://nereid-artifacts.yuiseki.com/<work>/` for easier human/agent logs.
 
 `prompt` accepts instruction text (or a `.txt` file with bullet lines), and submits generated `Work` objects via `kubectl create`.
 By default (`NEREID_PROMPT_PLANNER=auto`), it uses an LLM planner when OpenAI or Gemini API keys are set, and falls back to rule-based planning when LLM is unavailable.
@@ -83,6 +83,19 @@ WORK_NAME=$(./bin/nereid submit examples/works/codex-cli.yaml -n nereid -o name 
 
 The controller injects `NEREID_WORK_NAME` and `NEREID_ARTIFACT_DIR` into the container, and also applies `Grant.spec.env`, so API keys such as `OPENAI_API_KEY` / `GEMINI_API_KEY` can be passed safely via Secret refs.
 
+For `agent.cli.v1`, NEREID stores conversational artifacts when available:
+
+- `user-input.txt` (from submitted prompt annotation)
+- `agent.log` (raw agent stdout/stderr)
+- `dialogue.txt` (`[USER]` + `[AGENT]` combined view)
+
+Embed view:
+
+- `https://nereid.yuiseki.net/embed?work=<work-name>`
+- or `https://nereid.yuiseki.net/embed?artifact=<artifact-url>`
+
+`/embed` shows `user-input.txt` / `dialogue.txt` / `agent.log` and an iframe preview of the artifact.
+
 ```bash
 WORK_NAME=$(nereid submit examples/works/overpassql.yaml -n nereid -o name | cut -d/ -f2)
 nereid watch "$WORK_NAME" -n nereid
@@ -118,7 +131,7 @@ Deploy in-cluster with Helm by enabling:
 Default chart behavior:
 
 - UI/API: `https://nereid.yuiseki.net`
-- Artifacts: `http://nereid-artifacts.yuiseki.com/`
+- Artifacts: `https://nereid-artifacts.yuiseki.com/`
 - Directory listing for `/` is enabled.
 - `/static/artifacts` is not exposed on the main host by default (`artifacts.exposeOnMainHost=false`).
 
@@ -126,7 +139,7 @@ Important values:
 
 - `artifacts.servicePort=8080`
 - `artifacts.ingress.host=nereid-artifacts.yuiseki.com`
-- `artifacts.publicBaseUrl=http://nereid-artifacts.yuiseki.com`
+- `artifacts.publicBaseUrl=https://nereid-artifacts.yuiseki.com`
 
 ## Cloudflared Example
 

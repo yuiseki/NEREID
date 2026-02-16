@@ -39,6 +39,8 @@ var grantGVR = schema.GroupVersionResource{
 }
 
 const (
+	userPromptAnnotationKey = "nereid.yuiseki.net/user-prompt"
+
 	overpassJobImage   = "curlimages/curl:8.5.0"
 	styleJobImage      = "curlimages/curl:8.5.0"
 	duckdbJobImage     = "curlimages/curl:8.5.0"
@@ -341,6 +343,8 @@ func (c *Controller) buildJob(work *unstructured.Unstructured, jobName, kind str
 		return c.buildScriptJob(work, jobName, laz3DTilesJobImage, script), nil
 
 	case "agent.cli.v1":
+		userPrompt := workUserPrompt(work)
+
 		image, _, err := nestedStringAny(work.Object, "spec", "agent", "image")
 		if err != nil {
 			return nil, fmt.Errorf("failed to read spec.agent.image: %v", err)
@@ -370,9 +374,9 @@ func (c *Controller) buildJob(work *unstructured.Unstructured, jobName, kind str
 		}
 
 		if script != "" {
-			return c.buildScriptJob(work, jobName, image, buildAgentScript(work.GetName(), script)), nil
+			return c.buildScriptJob(work, jobName, image, buildAgentScript(work.GetName(), script, userPrompt)), nil
 		}
-		return c.buildScriptJob(work, jobName, image, buildAgentCommandScript(work.GetName(), command, args)), nil
+		return c.buildScriptJob(work, jobName, image, buildAgentCommandScript(work.GetName(), command, args, userPrompt)), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported spec.kind=%q", kind)
@@ -1310,8 +1314,9 @@ echo "done"
 `, workName, inputURI, sourceSRS, targetSRS, inAxisOrdering, outAxisOrdering, strconv.FormatBool(pyprojAlwaysXY), py3dtilesJobs, centerLon, centerLat)
 }
 
-func buildAgentScript(workName, userScript string) string {
+func buildAgentScript(workName, userScript, userPrompt string) string {
 	scriptB64 := base64.StdEncoding.EncodeToString([]byte(userScript))
+	promptB64 := base64.StdEncoding.EncodeToString([]byte(userPrompt))
 	return fmt.Sprintf(`set -eu
 WORK=%q
 OUT_DIR="/artifacts/${WORK}"
@@ -1321,6 +1326,11 @@ SCRIPT_B64=%q
 printf '%%s' "${SCRIPT_B64}" | base64 -d > /tmp/nereid-agent.sh
 chmod +x /tmp/nereid-agent.sh
 
+PROMPT_B64=%q
+if [ -n "${PROMPT_B64}" ]; then
+  printf '%%s' "${PROMPT_B64}" | base64 -d > "${OUT_DIR}/user-input.txt"
+fi
+
 export NEREID_WORK_NAME="${WORK}"
 export NEREID_ARTIFACT_DIR="${OUT_DIR}"
 
@@ -1328,6 +1338,16 @@ set +e
 /bin/sh /tmp/nereid-agent.sh > "${OUT_DIR}/agent.log" 2>&1
 status=$?
 set -e
+
+{
+  if [ -f "${OUT_DIR}/user-input.txt" ]; then
+    printf '[USER]\n'
+    cat "${OUT_DIR}/user-input.txt"
+    printf '\n\n'
+  fi
+  printf '[AGENT]\n'
+  cat "${OUT_DIR}/agent.log"
+} > "${OUT_DIR}/dialogue.txt"
 
 if [ ! -f "${OUT_DIR}/index.html" ]; then
   cat > "${OUT_DIR}/index.html" <<'HTML'
@@ -1338,7 +1358,10 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
     <h1>NEREID agent.cli.v1</h1>
     <p>script mode</p>
     <ul>
+      <li><a href="./user-input.txt">user-input.txt</a></li>
+      <li><a href="./dialogue.txt">dialogue.txt</a></li>
       <li><a href="./agent.log">agent.log</a></li>
+      <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
     </ul>
   </body>
 </html>
@@ -1346,10 +1369,10 @@ HTML
 fi
 
 exit "${status}"
-`, workName, scriptB64)
+`, workName, scriptB64, promptB64, workName)
 }
 
-func buildAgentCommandScript(workName string, command, args []string) string {
+func buildAgentCommandScript(workName string, command, args []string, userPrompt string) string {
 	all := append(append([]string{}, command...), args...)
 	quoted := make([]string, 0, len(all))
 	for _, p := range all {
@@ -1357,6 +1380,7 @@ func buildAgentCommandScript(workName string, command, args []string) string {
 	}
 	commandLine := strings.Join(quoted, " ")
 	commandTextB64 := base64.StdEncoding.EncodeToString([]byte(strings.Join(all, " ")))
+	promptB64 := base64.StdEncoding.EncodeToString([]byte(userPrompt))
 
 	return fmt.Sprintf(`set -eu
 WORK=%q
@@ -1369,10 +1393,25 @@ export NEREID_ARTIFACT_DIR="${OUT_DIR}"
 CMD_TEXT_B64=%q
 printf '%%s' "${CMD_TEXT_B64}" | base64 -d > "${OUT_DIR}/command.txt"
 
+PROMPT_B64=%q
+if [ -n "${PROMPT_B64}" ]; then
+  printf '%%s' "${PROMPT_B64}" | base64 -d > "${OUT_DIR}/user-input.txt"
+fi
+
 set +e
 %s > "${OUT_DIR}/agent.log" 2>&1
 status=$?
 set -e
+
+{
+  if [ -f "${OUT_DIR}/user-input.txt" ]; then
+    printf '[USER]\n'
+    cat "${OUT_DIR}/user-input.txt"
+    printf '\n\n'
+  fi
+  printf '[AGENT]\n'
+  cat "${OUT_DIR}/agent.log"
+} > "${OUT_DIR}/dialogue.txt"
 
 if [ ! -f "${OUT_DIR}/index.html" ]; then
   cat > "${OUT_DIR}/index.html" <<'HTML'
@@ -1383,8 +1422,11 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
     <h1>NEREID agent.cli.v1</h1>
     <p>command mode</p>
     <ul>
+      <li><a href="./user-input.txt">user-input.txt</a></li>
+      <li><a href="./dialogue.txt">dialogue.txt</a></li>
       <li><a href="./command.txt">command.txt</a></li>
       <li><a href="./agent.log">agent.log</a></li>
+      <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
     </ul>
   </body>
 </html>
@@ -1392,7 +1434,7 @@ HTML
 fi
 
 exit "${status}"
-`, workName, commandTextB64, commandLine)
+`, workName, commandTextB64, promptB64, commandLine, workName)
 }
 
 func shellQuote(s string) string {
@@ -1603,6 +1645,17 @@ func workGrantRefName(work *unstructured.Unstructured) string {
 	}
 	name, _, _ := unstructured.NestedString(work.Object, "spec", "grantRef", "name")
 	return strings.TrimSpace(name)
+}
+
+func workUserPrompt(work *unstructured.Unstructured) string {
+	if work == nil {
+		return ""
+	}
+	annotations := work.GetAnnotations()
+	if len(annotations) == 0 {
+		return ""
+	}
+	return strings.TrimSpace(annotations[userPromptAnnotationKey])
 }
 
 func (c *Controller) applyGrantToJob(job *batchv1.Job, grant *unstructured.Unstructured) error {

@@ -11,7 +11,7 @@ artifacts:
   # If true, also expose /static/artifacts on the main host ingress.
   exposeOnMainHost: false
   # Public base URL used by UI links and (by default) Work.status.artifactUrl.
-  publicBaseUrl: "http://nereid-artifacts.yuiseki.com"
+  publicBaseUrl: "https://nereid-artifacts.yuiseki.com"
   ingress:
     enabled: true
     className: nginx

@@ -115,7 +115,7 @@ func runPrompt(args []string) error {
 	baseTime := nowFunc().UTC()
 	for i, plan := range plans {
 		injectGrantRef(plan.spec, grantName)
-		body, workName, buildErr := buildGeneratedWorkSpec(plan.baseName, plan.spec, baseTime.Add(time.Duration(i)*time.Second))
+		body, workName, buildErr := buildGeneratedWorkSpec(plan.baseName, plan.spec, baseTime.Add(time.Duration(i)*time.Second), instructionText)
 		if buildErr != nil {
 			return buildErr
 		}
@@ -315,6 +315,9 @@ type instructionWorkPlan struct {
 }
 
 const (
+	userPromptAnnotationKey = "nereid.yuiseki.net/user-prompt"
+	maxUserPromptBytes      = 16 * 1024
+
 	plannerProviderOpenAI = "openai"
 	plannerProviderGemini = "gemini"
 )
@@ -965,15 +968,21 @@ out geom;`,
 	return instructionWorkPlan{}, fmt.Errorf("unsupported instruction line: %q", line)
 }
 
-func buildGeneratedWorkSpec(baseName string, spec map[string]interface{}, now time.Time) ([]byte, string, error) {
+func buildGeneratedWorkSpec(baseName string, spec map[string]interface{}, now time.Time, userPrompt string) ([]byte, string, error) {
 	workName := buildTimestampedName(baseName, now)
+	metadata := map[string]interface{}{
+		"name": workName,
+	}
+	if promptAnnotation := userPromptAnnotationValue(userPrompt); promptAnnotation != "" {
+		metadata["annotations"] = map[string]interface{}{
+			userPromptAnnotationKey: promptAnnotation,
+		}
+	}
 	obj := map[string]interface{}{
 		"apiVersion": "nereid.yuiseki.net/v1alpha1",
 		"kind":       "Work",
-		"metadata": map[string]interface{}{
-			"name": workName,
-		},
-		"spec": spec,
+		"metadata":   metadata,
+		"spec":       spec,
 	}
 	out, err := yaml.Marshal(obj)
 	if err != nil {
@@ -1003,6 +1012,18 @@ func buildOverpassSpec(title, query string, centerLon, centerLat, zoom float64) 
 			"layout": "map",
 		},
 	}
+}
+
+func userPromptAnnotationValue(prompt string) string {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return ""
+	}
+	b := []byte(prompt)
+	if len(b) <= maxUserPromptBytes {
+		return prompt
+	}
+	return strings.TrimSpace(string(b[:maxUserPromptBytes]))
 }
 
 func containsAll(s string, needles ...string) bool {
