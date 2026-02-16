@@ -1,0 +1,18 @@
+apiVersion: nereid.yuiseki.net/v1alpha1
+kind: Work
+metadata:
+  name: gemini-cli-smoke
+spec:
+  kind: agent.cli.v1
+  title: "Gemini CLI smoke test"
+  agent:
+    image: node:22-bookworm-slim
+    command:
+      - npx
+      - -y
+      - "@google/gemini-cli"
+      - --help
+  constraints:
+    deadlineSeconds: 900
+  artifacts:
+    layout: files

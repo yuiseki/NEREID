@@ -40,8 +40,24 @@ spec:
                     - duckdb.map.v1
                     - gdal.rastertile.v1
                     - laz.3dtiles.v1
+                    - agent.cli.v1
                 title:
                   type: string
+                agent:
+                  type: object
+                  properties:
+                    image:
+                      type: string
+                    script:
+                      type: string
+                    command:
+                      type: array
+                      items:
+                        type: string
+                    args:
+                      type: array
+                      items:
+                        type: string
                 overpass:
                   type: object
                   required: ["endpoint", "query"]

@@ -249,6 +249,20 @@ func TestParsePlannerWorksNormalizesStyleModeJSON(t *testing.T) {
 	}
 }
 
+func TestParsePlannerWorksAcceptsAgentCLIKind(t *testing.T) {
+	content := `{"works":[{"baseName":"agent-demo","spec":{"kind":"agent.cli.v1","title":"agent","agent":{"image":"node:22-bookworm-slim","command":["npx","-y","@google/gemini-cli","--help"]}}}]}`
+	plans, err := parsePlannerWorks(content)
+	if err != nil {
+		t.Fatalf("parsePlannerWorks() error = %v", err)
+	}
+	if len(plans) != 1 {
+		t.Fatalf("plan count mismatch got=%d want=1", len(plans))
+	}
+	if got, _ := plans[0].spec["kind"].(string); got != "agent.cli.v1" {
+		t.Fatalf("kind mismatch got=%q", got)
+	}
+}
+
 func TestPlanWorksWithLLMUsesOpenAICompatibleEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/chat/completions" {
@@ -278,6 +292,43 @@ func TestPlanWorksWithLLMUsesOpenAICompatibleEndpoint(t *testing.T) {
 	}
 	if got, _ := plans[0].spec["kind"].(string); got != "overpassql.map.v1" {
 		t.Fatalf("kind mismatch got=%q", got)
+	}
+}
+
+func TestPlannerAPIKeyFallsBackToGemini(t *testing.T) {
+	t.Setenv("NEREID_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("NEREID_GEMINI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "gemini-key")
+
+	if got := plannerAPIKey(); got != "gemini-key" {
+		t.Fatalf("plannerAPIKey() got=%q want=%q", got, "gemini-key")
+	}
+}
+
+func TestPlannerBaseURLDefaultsToGeminiWhenGeminiKeySet(t *testing.T) {
+	t.Setenv("NEREID_LLM_BASE_URL", "")
+	t.Setenv("NEREID_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("NEREID_GEMINI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "gemini-key")
+
+	if got := plannerBaseURL(); got != "https://generativelanguage.googleapis.com/v1beta/openai" {
+		t.Fatalf("plannerBaseURL() got=%q", got)
+	}
+}
+
+func TestPlannerModelDefaultsToGeminiWhenGeminiKeySet(t *testing.T) {
+	t.Setenv("NEREID_LLM_MODEL", "")
+	t.Setenv("NEREID_GEMINI_MODEL", "")
+	t.Setenv("GEMINI_MODEL", "")
+	t.Setenv("NEREID_OPENAI_API_KEY", "")
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("NEREID_GEMINI_API_KEY", "")
+	t.Setenv("GEMINI_API_KEY", "gemini-key")
+
+	if got := plannerModel(); got != "gemini-2.0-flash" {
+		t.Fatalf("plannerModel() got=%q want=%q", got, "gemini-2.0-flash")
 	}
 }
 

@@ -337,6 +337,88 @@ func TestBuildJobLAZ3DTilesGeneratesWorkflowScript(t *testing.T) {
 	}
 }
 
+func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "agent-cli-sample",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "agent.cli.v1",
+			"title": "agent sample",
+			"agent": map[string]interface{}{
+				"image": "node:22-bookworm-slim",
+				"command": []interface{}{
+					"npx",
+					"-y",
+					"@google/gemini-cli",
+					"--help",
+				},
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	job, err := c.buildJob(work, "work-agent-cli-sample", "agent.cli.v1")
+	if err != nil {
+		t.Fatalf("buildJob() error = %v", err)
+	}
+	if got := job.Spec.Template.Spec.Containers[0].Image; got != "node:22-bookworm-slim" {
+		t.Fatalf("unexpected image got=%q want=%q", got, "node:22-bookworm-slim")
+	}
+	script := job.Spec.Template.Spec.Containers[0].Args[0]
+	for _, needle := range []string{
+		"NEREID_WORK_NAME",
+		"NEREID_ARTIFACT_DIR",
+		"command.txt",
+		"agent.log",
+		"'@google/gemini-cli'",
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
+		}
+	}
+}
+
+func TestBuildJobAgentCLIRequiresImage(t *testing.T) {
+	work := &unstructured.Unstructured{Object: map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"name":      "agent-cli-invalid",
+			"namespace": "nereid",
+		},
+		"spec": map[string]interface{}{
+			"kind":  "agent.cli.v1",
+			"title": "agent invalid",
+			"agent": map[string]interface{}{
+				"script": "echo hello",
+			},
+		},
+	}}
+
+	c := &Controller{
+		cfg: Config{
+			JobNamespace:      "nereid-work",
+			LocalQueueName:    "nereid-localq",
+			ArtifactsHostPath: "/var/lib/nereid/artifacts",
+		},
+	}
+
+	_, err := c.buildJob(work, "work-agent-cli-invalid", "agent.cli.v1")
+	if err == nil {
+		t.Fatal("buildJob() expected error for missing image, got nil")
+	}
+	if !strings.Contains(err.Error(), "spec.agent.image is required") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestBuildJobUnsupportedKindReturnsError(t *testing.T) {
 	work := &unstructured.Unstructured{Object: map[string]interface{}{
 		"metadata": map[string]interface{}{

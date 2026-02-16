@@ -51,6 +51,16 @@ type instructionWorkPlan struct {
 	spec     map[string]interface{}
 }
 
+const (
+	plannerProviderOpenAI = "openai"
+	plannerProviderGemini = "gemini"
+)
+
+type plannerCredentials struct {
+	key      string
+	provider string
+}
+
 func main() {
 	addr := envOr("NEREID_API_BIND", ":8080")
 	workNamespace := envOr("NEREID_WORK_NAMESPACE", "nereid")
@@ -143,25 +153,25 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	grantName = strings.TrimSpace(grantName)
 
-	plannerKey := plannerAPIKey()
+	plannerCreds := plannerCredentialsFromEnv()
 	allowedKinds := []string(nil)
 	if grantName != "" {
-		keyFromGrant, kinds, resolveErr := s.resolvePlannerFromGrant(r.Context(), ns, grantName, plannerKey == "")
+		credsFromGrant, kinds, resolveErr := s.resolvePlannerFromGrant(r.Context(), ns, grantName, plannerCreds.key == "")
 		if resolveErr != nil {
 			writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": resolveErr.Error()})
 			return
 		}
 		allowedKinds = kinds
-		if plannerKey == "" {
-			plannerKey = keyFromGrant
+		if plannerCreds.key == "" {
+			plannerCreds = credsFromGrant
 		}
 	}
 
-	plans, err := planWorksWithPlanner(r.Context(), req.Prompt, plannerKey, allowedKinds)
+	plans, err := planWorksWithPlanner(r.Context(), req.Prompt, plannerCreds, allowedKinds)
 	if err != nil {
 		msg := err.Error()
-		if strings.TrimSpace(plannerKey) == "" && strings.ToLower(strings.TrimSpace(os.Getenv("NEREID_PROMPT_PLANNER"))) != "rules" {
-			msg = msg + " (hint: configure OpenAI API key via the default Grant secretKeyRef, or set NEREID_OPENAI_API_KEY for nereid-api)"
+		if strings.TrimSpace(plannerCreds.key) == "" && strings.ToLower(strings.TrimSpace(os.Getenv("NEREID_PROMPT_PLANNER"))) != "rules" {
+			msg = msg + " (hint: configure OpenAI/Gemini API key via the default Grant secretKeyRef, or set NEREID_OPENAI_API_KEY / NEREID_GEMINI_API_KEY for nereid-api)"
 		}
 		writeJSON(w, http.StatusBadRequest, map[string]interface{}{"error": msg})
 		return
@@ -217,36 +227,46 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (s *server) resolvePlannerFromGrant(ctx context.Context, namespace, grantName string, wantKey bool) (string, []string, error) {
+func (s *server) resolvePlannerFromGrant(ctx context.Context, namespace, grantName string, wantKey bool) (plannerCredentials, []string, error) {
 	grant, err := s.dynamic.Resource(grantGVR).Namespace(namespace).Get(ctx, grantName, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
-			return "", nil, fmt.Errorf("grant %q not found", grantName)
+			return plannerCredentials{}, nil, fmt.Errorf("grant %q not found", grantName)
 		}
-		return "", nil, fmt.Errorf("get grant %q: %w", grantName, err)
+		return plannerCredentials{}, nil, fmt.Errorf("get grant %q: %w", grantName, err)
 	}
 
 	allowedKinds, _, err := unstructured.NestedStringSlice(grant.Object, "spec", "allowedKinds")
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to read grant %q spec.allowedKinds: %v", grantName, err)
+		return plannerCredentials{}, nil, fmt.Errorf("failed to read grant %q spec.allowedKinds: %v", grantName, err)
 	}
 
 	if !wantKey {
-		return "", allowedKinds, nil
+		return plannerCredentials{}, allowedKinds, nil
 	}
 
-	// Prefer NEREID_OPENAI_API_KEY in grant, fall back to OPENAI_API_KEY.
-	key, err := s.grantEnvValue(ctx, namespace, grant, "NEREID_OPENAI_API_KEY")
-	if err != nil {
-		return "", nil, err
+	candidates := []struct {
+		name     string
+		provider string
+	}{
+		{name: "NEREID_OPENAI_API_KEY", provider: plannerProviderOpenAI},
+		{name: "OPENAI_API_KEY", provider: plannerProviderOpenAI},
+		{name: "NEREID_GEMINI_API_KEY", provider: plannerProviderGemini},
+		{name: "GEMINI_API_KEY", provider: plannerProviderGemini},
 	}
-	if key == "" {
-		key, err = s.grantEnvValue(ctx, namespace, grant, "OPENAI_API_KEY")
-		if err != nil {
-			return "", nil, err
+
+	for _, c := range candidates {
+		key, keyErr := s.grantEnvValue(ctx, namespace, grant, c.name)
+		if keyErr != nil {
+			return plannerCredentials{}, nil, keyErr
 		}
+		if strings.TrimSpace(key) == "" {
+			continue
+		}
+		return plannerCredentials{key: key, provider: c.provider}, allowedKinds, nil
 	}
-	return key, allowedKinds, nil
+
+	return plannerCredentials{}, allowedKinds, nil
 }
 
 func (s *server) grantEnvValue(ctx context.Context, namespace string, grant *unstructured.Unstructured, name string) (string, error) {
@@ -436,7 +456,7 @@ func sanitizeName(v string) string {
 	return strings.Trim(b.String(), "-")
 }
 
-func planWorksWithPlanner(ctx context.Context, text string, plannerKey string, allowedKinds []string) ([]instructionWorkPlan, error) {
+func planWorksWithPlanner(ctx context.Context, text string, plannerCreds plannerCredentials, allowedKinds []string) ([]instructionWorkPlan, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("NEREID_PROMPT_PLANNER")))
 	if mode == "" {
 		mode = "auto"
@@ -446,7 +466,7 @@ func planWorksWithPlanner(ctx context.Context, text string, plannerKey string, a
 	case "rules", "rule":
 		return planWorksFromInstructionText(text)
 	case "llm":
-		return planWorksWithLLM(ctx, text, plannerKey, allowedKinds)
+		return planWorksWithLLM(ctx, text, plannerCreds, allowedKinds)
 	case "auto":
 		// Prefer deterministic rules when they match, and use LLM as a fallback for
 		// broader/unmatched prompts.
@@ -454,10 +474,10 @@ func planWorksWithPlanner(ctx context.Context, text string, plannerKey string, a
 		if rulesErr == nil {
 			return rulesPlans, nil
 		}
-		if strings.TrimSpace(plannerKey) == "" {
+		if strings.TrimSpace(plannerCreds.key) == "" {
 			return nil, rulesErr
 		}
-		plans, err := planWorksWithLLM(ctx, text, plannerKey, allowedKinds)
+		plans, err := planWorksWithLLM(ctx, text, plannerCreds, allowedKinds)
 		if err == nil {
 			return plans, nil
 		}
@@ -504,30 +524,60 @@ func splitInstructionLines(text string) []string {
 }
 
 func plannerAPIKey() string {
+	return plannerCredentialsFromEnv().key
+}
+
+func plannerCredentialsFromEnv() plannerCredentials {
 	if v := strings.TrimSpace(os.Getenv("NEREID_OPENAI_API_KEY")); v != "" {
-		return v
+		return plannerCredentials{key: v, provider: plannerProviderOpenAI}
 	}
-	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
+		return plannerCredentials{key: v, provider: plannerProviderOpenAI}
+	}
+	if v := strings.TrimSpace(os.Getenv("NEREID_GEMINI_API_KEY")); v != "" {
+		return plannerCredentials{key: v, provider: plannerProviderGemini}
+	}
+	if v := strings.TrimSpace(os.Getenv("GEMINI_API_KEY")); v != "" {
+		return plannerCredentials{key: v, provider: plannerProviderGemini}
+	}
+	return plannerCredentials{}
 }
 
-func plannerBaseURL() string {
+func plannerBaseURL(provider string) string {
 	base := strings.TrimSpace(os.Getenv("NEREID_LLM_BASE_URL"))
-	if base == "" {
-		base = "https://api.openai.com/v1"
+	if base != "" {
+		return strings.TrimRight(base, "/")
 	}
-	return strings.TrimRight(base, "/")
+
+	switch provider {
+	case plannerProviderGemini:
+		return "https://generativelanguage.googleapis.com/v1beta/openai"
+	default:
+		return "https://api.openai.com/v1"
+	}
 }
 
-func plannerModel() string {
+func plannerModel(provider string) string {
 	model := strings.TrimSpace(os.Getenv("NEREID_LLM_MODEL"))
-	if model == "" {
-		model = "gpt-4o-mini"
+	if model != "" {
+		return model
 	}
-	return model
+
+	if provider == plannerProviderGemini {
+		if v := strings.TrimSpace(os.Getenv("NEREID_GEMINI_MODEL")); v != "" {
+			return v
+		}
+		if v := strings.TrimSpace(os.Getenv("GEMINI_MODEL")); v != "" {
+			return v
+		}
+		return "gemini-2.0-flash"
+	}
+
+	return "gpt-4o-mini"
 }
 
 func plannerSystemPrompt(allowedKinds []string) string {
-	kindsLine := "Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1."
+	kindsLine := "Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1, agent.cli.v1."
 	if len(allowedKinds) > 0 {
 		kindsLine = "You MUST restrict spec.kind to: " + strings.Join(allowedKinds, ", ") + "."
 	}
@@ -554,19 +604,20 @@ Rules:
   spec.overpass.query (valid Overpass QL)
   spec.render.viewport.center [lon,lat] and zoom when you can infer it.
 - For maplibre.style.v1, include spec.style.sourceStyle.mode and (json or url).
+- For agent.cli.v1, include spec.agent.image and either spec.agent.script or spec.agent.command.
 - Return only valid JSON.
 
 ` + kindsLine
 }
 
-func planWorksWithLLM(ctx context.Context, text string, plannerKey string, allowedKinds []string) ([]instructionWorkPlan, error) {
-	key := strings.TrimSpace(plannerKey)
+func planWorksWithLLM(ctx context.Context, text string, plannerCreds plannerCredentials, allowedKinds []string) ([]instructionWorkPlan, error) {
+	key := strings.TrimSpace(plannerCreds.key)
 	if key == "" {
-		return nil, errors.New("llm planner requires NEREID_OPENAI_API_KEY or OPENAI_API_KEY")
+		return nil, errors.New("llm planner requires NEREID_OPENAI_API_KEY/OPENAI_API_KEY or NEREID_GEMINI_API_KEY/GEMINI_API_KEY")
 	}
 
 	reqBody := map[string]interface{}{
-		"model": plannerModel(),
+		"model": plannerModel(plannerCreds.provider),
 		"messages": []map[string]string{
 			{"role": "system", "content": plannerSystemPrompt(allowedKinds)},
 			{"role": "user", "content": text},
@@ -579,7 +630,7 @@ func planWorksWithLLM(ctx context.Context, text string, plannerKey string, allow
 		return nil, fmt.Errorf("encode planner request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, plannerBaseURL()+"/chat/completions", strings.NewReader(string(rawReq)))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, plannerBaseURL(plannerCreds.provider)+"/chat/completions", strings.NewReader(string(rawReq)))
 	if err != nil {
 		return nil, fmt.Errorf("create planner request: %w", err)
 	}
@@ -760,10 +811,51 @@ func validatePlannedSpec(spec map[string]interface{}) error {
 			return fmt.Errorf(`unsupported spec.style.sourceStyle.mode=%q`, mode)
 		}
 	case "duckdb.map.v1", "gdal.rastertile.v1", "laz.3dtiles.v1":
+	case "agent.cli.v1":
+		agent, _ := spec["agent"].(map[string]interface{})
+		if agent == nil {
+			return errors.New(`spec.agent is required for agent.cli.v1`)
+		}
+		image, _ := agent["image"].(string)
+		if strings.TrimSpace(image) == "" {
+			return errors.New(`spec.agent.image is required for agent.cli.v1`)
+		}
+		script, _ := agent["script"].(string)
+		hasCommand, err := hasStringArrayField(agent, "command")
+		if err != nil {
+			return err
+		}
+		if _, err := hasStringArrayField(agent, "args"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(script) == "" && !hasCommand {
+			return errors.New(`spec.agent.script or spec.agent.command is required for agent.cli.v1`)
+		}
 	default:
 		return fmt.Errorf("unsupported spec.kind=%q", kind)
 	}
 	return nil
+}
+
+func hasStringArrayField(obj map[string]interface{}, field string) (bool, error) {
+	v, ok := obj[field]
+	if !ok || v == nil {
+		return false, nil
+	}
+
+	switch raw := v.(type) {
+	case []string:
+		return len(raw) > 0, nil
+	case []interface{}:
+		for i, it := range raw {
+			if _, ok := it.(string); !ok {
+				return false, fmt.Errorf("spec.agent.%s[%d] must be a string", field, i)
+			}
+		}
+		return len(raw) > 0, nil
+	default:
+		return false, fmt.Errorf("spec.agent.%s must be an array of strings", field)
+	}
 }
 
 func planWorkFromInstructionLine(line string) (instructionWorkPlan, error) {

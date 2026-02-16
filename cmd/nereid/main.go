@@ -314,6 +314,16 @@ type instructionWorkPlan struct {
 	spec     map[string]interface{}
 }
 
+const (
+	plannerProviderOpenAI = "openai"
+	plannerProviderGemini = "gemini"
+)
+
+type plannerCredentials struct {
+	key      string
+	provider string
+}
+
 func planWorksWithPlanner(ctx context.Context, text string) ([]instructionWorkPlan, error) {
 	mode := strings.ToLower(strings.TrimSpace(os.Getenv("NEREID_PROMPT_PLANNER")))
 	if mode == "" {
@@ -404,32 +414,61 @@ func splitInstructionLines(text string) []string {
 }
 
 func plannerAPIKey() string {
+	return plannerCredentialsFromEnv().key
+}
+
+func plannerCredentialsFromEnv() plannerCredentials {
 	if v := strings.TrimSpace(os.Getenv("NEREID_OPENAI_API_KEY")); v != "" {
-		return v
+		return plannerCredentials{key: v, provider: plannerProviderOpenAI}
 	}
-	return strings.TrimSpace(os.Getenv("OPENAI_API_KEY"))
+	if v := strings.TrimSpace(os.Getenv("OPENAI_API_KEY")); v != "" {
+		return plannerCredentials{key: v, provider: plannerProviderOpenAI}
+	}
+	if v := strings.TrimSpace(os.Getenv("NEREID_GEMINI_API_KEY")); v != "" {
+		return plannerCredentials{key: v, provider: plannerProviderGemini}
+	}
+	if v := strings.TrimSpace(os.Getenv("GEMINI_API_KEY")); v != "" {
+		return plannerCredentials{key: v, provider: plannerProviderGemini}
+	}
+	return plannerCredentials{}
 }
 
 func plannerBaseURL() string {
 	base := strings.TrimSpace(os.Getenv("NEREID_LLM_BASE_URL"))
-	if base == "" {
-		base = "https://api.openai.com/v1"
+	if base != "" {
+		return strings.TrimRight(base, "/")
 	}
-	return strings.TrimRight(base, "/")
+
+	switch plannerCredentialsFromEnv().provider {
+	case plannerProviderGemini:
+		return "https://generativelanguage.googleapis.com/v1beta/openai"
+	default:
+		return "https://api.openai.com/v1"
+	}
 }
 
 func plannerModel() string {
 	model := strings.TrimSpace(os.Getenv("NEREID_LLM_MODEL"))
-	if model == "" {
-		model = "gpt-4o-mini"
+	if model != "" {
+		return model
 	}
-	return model
+
+	if plannerCredentialsFromEnv().provider == plannerProviderGemini {
+		if v := strings.TrimSpace(os.Getenv("NEREID_GEMINI_MODEL")); v != "" {
+			return v
+		}
+		if v := strings.TrimSpace(os.Getenv("GEMINI_MODEL")); v != "" {
+			return v
+		}
+		return "gemini-2.0-flash"
+	}
+	return "gpt-4o-mini"
 }
 
 func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, error) {
 	key := plannerAPIKey()
 	if key == "" {
-		return nil, errors.New("llm planner requires NEREID_OPENAI_API_KEY or OPENAI_API_KEY")
+		return nil, errors.New("llm planner requires NEREID_OPENAI_API_KEY/OPENAI_API_KEY or NEREID_GEMINI_API_KEY/GEMINI_API_KEY")
 	}
 
 	reqBody := map[string]interface{}{
@@ -508,11 +547,13 @@ Output MUST be JSON only (no markdown), with this schema:
 
 Rules:
 - Generate one work per instruction item when multiple items are requested.
-- Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1.
+- Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1, agent.cli.v1.
 - For overpassql.map.v1, include:
   spec.title, spec.overpass.endpoint="https://overpass-api.de/api/interpreter", spec.overpass.query.
 - For maplibre.style.v1, include:
   spec.title, spec.style.sourceStyle.mode, and style JSON/url.
+- For agent.cli.v1, include:
+  spec.title, spec.agent.image, and either spec.agent.script or spec.agent.command.
 - Include spec.render.viewport.center [lon,lat] and zoom when possible.
 - Include spec.constraints.deadlineSeconds and spec.artifacts.layout.
 - Return only valid JSON.`
@@ -670,10 +711,51 @@ func validatePlannedSpec(spec map[string]interface{}) error {
 		}
 	case "duckdb.map.v1", "gdal.rastertile.v1", "laz.3dtiles.v1":
 		// Allow through; controller validates detailed required fields.
+	case "agent.cli.v1":
+		agent, _ := spec["agent"].(map[string]interface{})
+		if agent == nil {
+			return errors.New(`spec.agent is required for agent.cli.v1`)
+		}
+		image, _ := agent["image"].(string)
+		if strings.TrimSpace(image) == "" {
+			return errors.New(`spec.agent.image is required for agent.cli.v1`)
+		}
+		script, _ := agent["script"].(string)
+		hasCommand, err := hasStringArrayField(agent, "command")
+		if err != nil {
+			return err
+		}
+		if _, err := hasStringArrayField(agent, "args"); err != nil {
+			return err
+		}
+		if strings.TrimSpace(script) == "" && !hasCommand {
+			return errors.New(`spec.agent.script or spec.agent.command is required for agent.cli.v1`)
+		}
 	default:
 		return fmt.Errorf("unsupported spec.kind=%q", kind)
 	}
 	return nil
+}
+
+func hasStringArrayField(obj map[string]interface{}, field string) (bool, error) {
+	v, ok := obj[field]
+	if !ok || v == nil {
+		return false, nil
+	}
+
+	switch raw := v.(type) {
+	case []string:
+		return len(raw) > 0, nil
+	case []interface{}:
+		for i, it := range raw {
+			if _, ok := it.(string); !ok {
+				return false, fmt.Errorf("spec.agent.%s[%d] must be a string", field, i)
+			}
+		}
+		return len(raw) > 0, nil
+	default:
+		return false, fmt.Errorf("spec.agent.%s must be an array of strings", field)
+	}
 }
 
 func planWorkFromInstructionLine(line string) (instructionWorkPlan, error) {

@@ -14,6 +14,7 @@ spec:
     - duckdb.map.v1
     - gdal.rastertile.v1
     - laz.3dtiles.v1
+    - agent.cli.v1
   kueue:
     localQueueName: {{ .Values.kueue.localQueueName | quote }}
   runtimeClassName: {{ .Values.kyvernoPolicies.runtimeClassName | quote }}
@@ -30,5 +31,11 @@ spec:
         name: {{ .Values.grants.default.openaiSecretName | quote }}
         key: {{ .Values.grants.default.openaiSecretKey | quote }}
         optional: {{ .Values.grants.default.openaiSecretOptional }}
+    {{- if .Values.grants.default.geminiSecretName }}
+    - name: GEMINI_API_KEY
+      secretKeyRef:
+        name: {{ .Values.grants.default.geminiSecretName | quote }}
+        key: {{ .Values.grants.default.geminiSecretKey | quote }}
+        optional: {{ .Values.grants.default.geminiSecretOptional }}
+    {{- end }}
 {{- end }}
-

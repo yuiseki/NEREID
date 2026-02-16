@@ -32,10 +32,16 @@ api:
   defaultGrant: "nereid-default"
   promptPlanner: auto
   llmBaseUrl: ""
-  llmModel: gpt-4o-mini
+  # Leave empty to auto-select by key type:
+  # - OpenAI key -> gpt-4o-mini
+  # - Gemini key -> gemini-2.0-flash
+  llmModel: ""
+  # Optional Gemini-specific override when llmModel is empty.
+  geminiModel: ""
   # Optional: set a plaintext key for quick MVP deployment.
   # Prefer secret management in production.
   openaiApiKey: ""
+  geminiApiKey: ""
 
 grants:
   default:
@@ -44,6 +50,10 @@ grants:
     openaiSecretName: "nereid-openai"
     openaiSecretKey: "api-key"
     openaiSecretOptional: true
+    # Optional: set to inject GEMINI_API_KEY in the default Grant.
+    geminiSecretName: ""
+    geminiSecretKey: "api-key"
+    geminiSecretOptional: true
 
 controller:
   enabled: true

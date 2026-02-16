@@ -40,9 +40,17 @@ spec:
               value: {{ .Values.api.llmBaseUrl | quote }}
             - name: NEREID_LLM_MODEL
               value: {{ .Values.api.llmModel | quote }}
+            {{- if .Values.api.geminiModel }}
+            - name: NEREID_GEMINI_MODEL
+              value: {{ .Values.api.geminiModel | quote }}
+            {{- end }}
             {{- if .Values.api.openaiApiKey }}
             - name: NEREID_OPENAI_API_KEY
               value: {{ .Values.api.openaiApiKey | quote }}
+            {{- end }}
+            {{- if .Values.api.geminiApiKey }}
+            - name: NEREID_GEMINI_API_KEY
+              value: {{ .Values.api.geminiApiKey | quote }}
             {{- end }}
           ports:
             - containerPort: 8080

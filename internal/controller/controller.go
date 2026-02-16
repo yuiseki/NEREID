@@ -340,6 +340,40 @@ func (c *Controller) buildJob(work *unstructured.Unstructured, jobName, kind str
 		script := buildLAZ3DTilesScript(work.GetName(), inputURI, sourceSRS, targetSRS, inAxisOrdering, outAxisOrdering, pyprojAlwaysXY, py3dtilesJobs, lon, lat, zoom)
 		return c.buildScriptJob(work, jobName, laz3DTilesJobImage, script), nil
 
+	case "agent.cli.v1":
+		image, _, err := nestedStringAny(work.Object, "spec", "agent", "image")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read spec.agent.image: %v", err)
+		}
+		image = strings.TrimSpace(image)
+		if image == "" {
+			return nil, fmt.Errorf("spec.agent.image is required")
+		}
+
+		script, _, err := nestedStringAny(work.Object, "spec", "agent", "script")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read spec.agent.script: %v", err)
+		}
+		script = strings.TrimSpace(script)
+
+		command, _, err := nestedStringSlice(work.Object, "spec", "agent", "command")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read spec.agent.command: %v", err)
+		}
+		args, _, err := nestedStringSlice(work.Object, "spec", "agent", "args")
+		if err != nil {
+			return nil, fmt.Errorf("failed to read spec.agent.args: %v", err)
+		}
+
+		if script == "" && len(command) == 0 {
+			return nil, fmt.Errorf("spec.agent.script or spec.agent.command is required")
+		}
+
+		if script != "" {
+			return c.buildScriptJob(work, jobName, image, buildAgentScript(work.GetName(), script)), nil
+		}
+		return c.buildScriptJob(work, jobName, image, buildAgentCommandScript(work.GetName(), command, args)), nil
+
 	default:
 		return nil, fmt.Errorf("unsupported spec.kind=%q", kind)
 	}
@@ -1276,6 +1310,98 @@ echo "done"
 `, workName, inputURI, sourceSRS, targetSRS, inAxisOrdering, outAxisOrdering, strconv.FormatBool(pyprojAlwaysXY), py3dtilesJobs, centerLon, centerLat)
 }
 
+func buildAgentScript(workName, userScript string) string {
+	scriptB64 := base64.StdEncoding.EncodeToString([]byte(userScript))
+	return fmt.Sprintf(`set -eu
+WORK=%q
+OUT_DIR="/artifacts/${WORK}"
+mkdir -p "${OUT_DIR}"
+
+SCRIPT_B64=%q
+printf '%%s' "${SCRIPT_B64}" | base64 -d > /tmp/nereid-agent.sh
+chmod +x /tmp/nereid-agent.sh
+
+export NEREID_WORK_NAME="${WORK}"
+export NEREID_ARTIFACT_DIR="${OUT_DIR}"
+
+set +e
+/bin/sh /tmp/nereid-agent.sh > "${OUT_DIR}/agent.log" 2>&1
+status=$?
+set -e
+
+if [ ! -f "${OUT_DIR}/index.html" ]; then
+  cat > "${OUT_DIR}/index.html" <<'HTML'
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"/><title>NEREID agent.cli.v1</title></head>
+  <body>
+    <h1>NEREID agent.cli.v1</h1>
+    <p>script mode</p>
+    <ul>
+      <li><a href="./agent.log">agent.log</a></li>
+    </ul>
+  </body>
+</html>
+HTML
+fi
+
+exit "${status}"
+`, workName, scriptB64)
+}
+
+func buildAgentCommandScript(workName string, command, args []string) string {
+	all := append(append([]string{}, command...), args...)
+	quoted := make([]string, 0, len(all))
+	for _, p := range all {
+		quoted = append(quoted, shellQuote(p))
+	}
+	commandLine := strings.Join(quoted, " ")
+	commandTextB64 := base64.StdEncoding.EncodeToString([]byte(strings.Join(all, " ")))
+
+	return fmt.Sprintf(`set -eu
+WORK=%q
+OUT_DIR="/artifacts/${WORK}"
+mkdir -p "${OUT_DIR}"
+
+export NEREID_WORK_NAME="${WORK}"
+export NEREID_ARTIFACT_DIR="${OUT_DIR}"
+
+CMD_TEXT_B64=%q
+printf '%%s' "${CMD_TEXT_B64}" | base64 -d > "${OUT_DIR}/command.txt"
+
+set +e
+%s > "${OUT_DIR}/agent.log" 2>&1
+status=$?
+set -e
+
+if [ ! -f "${OUT_DIR}/index.html" ]; then
+  cat > "${OUT_DIR}/index.html" <<'HTML'
+<!doctype html>
+<html>
+  <head><meta charset="utf-8"/><title>NEREID agent.cli.v1</title></head>
+  <body>
+    <h1>NEREID agent.cli.v1</h1>
+    <p>command mode</p>
+    <ul>
+      <li><a href="./command.txt">command.txt</a></li>
+      <li><a href="./agent.log">agent.log</a></li>
+    </ul>
+  </body>
+</html>
+HTML
+fi
+
+exit "${status}"
+`, workName, commandTextB64, commandLine)
+}
+
+func shellQuote(s string) string {
+	if s == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'"'"'`) + "'"
+}
+
 func (c *Controller) updateWorkStatus(ctx context.Context, work *unstructured.Unstructured, phase, message, artifact string) error {
 	return retry.RetryOnConflict(retry.DefaultBackoff, func() error {
 		latest, err := c.dynamic.Resource(workGVR).Namespace(work.GetNamespace()).Get(ctx, work.GetName(), metav1.GetOptions{})
@@ -1752,6 +1878,34 @@ func nestedStringAny(obj map[string]interface{}, fields ...string) (string, bool
 		return s, true, nil
 	default:
 		return fmt.Sprintf("%v", s), true, nil
+	}
+}
+
+func nestedStringSlice(obj map[string]interface{}, fields ...string) ([]string, bool, error) {
+	v, found, err := unstructured.NestedFieldNoCopy(obj, fields...)
+	if err != nil || !found || v == nil {
+		return nil, found, err
+	}
+
+	switch raw := v.(type) {
+	case []string:
+		out := make([]string, 0, len(raw))
+		for _, s := range raw {
+			out = append(out, strings.TrimSpace(s))
+		}
+		return out, true, nil
+	case []interface{}:
+		out := make([]string, 0, len(raw))
+		for i, it := range raw {
+			s, ok := it.(string)
+			if !ok {
+				return nil, true, fmt.Errorf("%s[%d] must be a string", strings.Join(fields, "."), i)
+			}
+			out = append(out, strings.TrimSpace(s))
+		}
+		return out, true, nil
+	default:
+		return nil, true, fmt.Errorf("%s must be an array of strings", strings.Join(fields, "."))
 	}
 }
 

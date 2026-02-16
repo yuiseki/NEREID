@@ -18,6 +18,7 @@ Supported `Work.spec.kind`:
 - `duckdb.map.v1` (current scaffold)
 - `gdal.rastertile.v1` (`gdalinfo` -> `gdal_translate` -> `gdalwarp` -> `gdal2tiles.py` -> web map)
 - `laz.3dtiles.v1` (`pdal info` -> axis-order/CRS conversion -> `py3dtiles convert` -> Cesium preview)
+- `agent.cli.v1` (run coding-agent CLIs such as Codex CLI / Gemini CLI in Kueue-admitted Jobs)
 
 Note: `charts/nereid/templates/example-job.yaml` is a legacy single-Job scaffold.
 For multi-usecase expansion, use `Work` + `nereid-controller` (kind-based job generation).
@@ -30,14 +31,16 @@ For multi-usecase expansion, use `Work` + `nereid-controller` (kind-based job ge
 After successful submit, it also prints `artifactUrl=http://nereid-artifacts.yuiseki.com/<work>/` for easier human/agent logs.
 
 `prompt` accepts instruction text (or a `.txt` file with bullet lines), and submits generated `Work` objects via `kubectl create`.
-By default (`NEREID_PROMPT_PLANNER=auto`), it uses an LLM planner when `NEREID_OPENAI_API_KEY` or `OPENAI_API_KEY` is set, and falls back to rule-based planning when LLM is unavailable.
+By default (`NEREID_PROMPT_PLANNER=auto`), it uses an LLM planner when OpenAI or Gemini API keys are set, and falls back to rule-based planning when LLM is unavailable.
 
 Planner-related environment variables:
 
 - `NEREID_PROMPT_PLANNER=auto|llm|rules` (default: `auto`)
 - `NEREID_OPENAI_API_KEY` (or `OPENAI_API_KEY`)
-- `NEREID_LLM_BASE_URL` (default: `https://api.openai.com/v1`)
-- `NEREID_LLM_MODEL` (default: `gpt-4o-mini`)
+- `NEREID_GEMINI_API_KEY` (or `GEMINI_API_KEY`)
+- `NEREID_LLM_BASE_URL` (default: OpenAI `https://api.openai.com/v1`, Gemini `https://generativelanguage.googleapis.com/v1beta/openai`)
+- `NEREID_LLM_MODEL` (optional override for any provider)
+- `NEREID_GEMINI_MODEL` / `GEMINI_MODEL` (optional Gemini-specific model override; default `gemini-2.0-flash`)
 
 Build a local binary:
 
@@ -61,6 +64,24 @@ WORK_NAME=$(./bin/nereid submit examples/works/laz.yaml -n nereid -o name | cut 
 
 cat examples/instructions/trident-ja.txt | ./bin/nereid prompt - -n nereid --dry-run=server -o name
 ```
+
+Agent CLI workload examples:
+
+```bash
+WORK_NAME=$(./bin/nereid submit examples/works/gemini-cli.yaml -n nereid -o name | cut -d/ -f2)
+./bin/nereid watch "$WORK_NAME" -n nereid
+
+WORK_NAME=$(./bin/nereid submit examples/works/codex-cli.yaml -n nereid -o name | cut -d/ -f2)
+./bin/nereid watch "$WORK_NAME" -n nereid
+```
+
+`agent.cli.v1` supports:
+
+- `spec.agent.image` (required)
+- `spec.agent.script` (shell script)
+- `spec.agent.command` + `spec.agent.args` (array-of-strings command mode)
+
+The controller injects `NEREID_WORK_NAME` and `NEREID_ARTIFACT_DIR` into the container, and also applies `Grant.spec.env`, so API keys such as `OPENAI_API_KEY` / `GEMINI_API_KEY` can be passed safely via Secret refs.
 
 ```bash
 WORK_NAME=$(nereid submit examples/works/overpassql.yaml -n nereid -o name | cut -d/ -f2)
