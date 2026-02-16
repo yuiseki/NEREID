@@ -373,6 +373,8 @@ func composeAgentPrompt(prompt, parentWork, followupContext string) string {
 	b.WriteString(`You are operating inside NEREID artifact workspace.
 Mandatory output contract:
 - You MUST create or update ./index.html in the current directory.
+- First action: write a minimal ./index.html to disk (example: an <h1>Hello, world</h1> page) so artifact rendering is guaranteed from the beginning.
+- After that bootstrap step, replace/update ./index.html to satisfy the real instruction.
 - You have shell access; write files to disk with commands, not only with narrative text.
 - Do not finish with explanation-only output. Persist files before finishing.
 - If user prompt has multiple bullet/line instructions, treat each line independently.
@@ -442,6 +444,31 @@ OUT_TEXT="${OUT_DIR}/gemini-output.txt"
 TMP_HTML="${OUT_DIR}/index.generated.tmp.html"
 export HOME="${OUT_DIR}/.home"
 mkdir -p "${HOME}"
+
+if [ ! -s "${OUT_DIR}/index.html" ]; then
+cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>NEREID Gemini Bootstrap</title>
+    <style>
+      html, body { margin: 0; padding: 0; background: #f7fafc; color: #1f2d3d; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace; }
+      .wrap { max-width: 980px; margin: 0 auto; padding: 14px; }
+      h1 { margin: 0 0 10px 0; font-size: 18px; }
+      p { margin: 0; font-size: 13px; color: #355a83; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h1>Hello, world</h1>
+      <p>Gemini CLI is preparing artifact output...</p>
+    </div>
+  </body>
+</html>
+HTMLBOOT
+fi
 
 if [ ! -s "${PROMPT_FILE}" ]; then
   printf '%s\n' "No user prompt found in ${PROMPT_FILE}" > "${OUT_TEXT}"
