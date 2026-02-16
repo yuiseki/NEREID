@@ -213,6 +213,12 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, "apt-get install -y -qq --no-install-recommends procps") {
 		t.Fatalf("geminiAgentScript() missing pgrep bootstrap for slim image: %q", script)
 	}
+	if !strings.Contains(script, "YOLO mode is enabled\\. All tool calls will be automatically approved\\.") {
+		t.Fatalf("geminiAgentScript() missing YOLO banner cleanup filter: %q", script)
+	}
+	if !strings.Contains(script, "Hook registry initialized with [0-9][0-9]* hook entries") {
+		t.Fatalf("geminiAgentScript() missing hook registry cleanup filter: %q", script)
+	}
 }
 
 func TestGenerateWorkIDv7(t *testing.T) {

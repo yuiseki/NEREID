@@ -461,6 +461,8 @@ set -e
 if ! sed \
   -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
   -e '/^npm[[:space:]]\+notice/d' \
+  -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
+  -e '/^Hook registry initialized with [0-9][0-9]* hook entries$/d' \
   "${OUT_TEXT_RAW}" > "${OUT_TEXT}"; then
   cp "${OUT_TEXT_RAW}" "${OUT_TEXT}"
 fi

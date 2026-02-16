@@ -4,3 +4,4 @@
 .playwright-cli/
 .env
 .env.local
+tests/results/
