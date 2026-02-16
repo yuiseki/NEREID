@@ -206,6 +206,8 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"legacy-work-spec.json",
 				"GEMINI_MD_FILE",
 				"@google/gemini-cli",
+				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}\"",
+				"--model \"${GEMINI_CLI_MODEL}\"",
 				"legacy-kind-prompt.txt",
 				"@./.gemini/skills/create-skills/SKILL.md",
 				"./specials/skills/",

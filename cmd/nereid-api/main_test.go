@@ -213,6 +213,12 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, "apt-get install -y -qq --no-install-recommends procps") {
 		t.Fatalf("geminiAgentScript() missing pgrep bootstrap for slim image: %q", script)
 	}
+	if !strings.Contains(script, `GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}"`) {
+		t.Fatalf("geminiAgentScript() missing gemini-2.5-flash model default: %q", script)
+	}
+	if !strings.Contains(script, `--model "${GEMINI_CLI_MODEL}"`) {
+		t.Fatalf("geminiAgentScript() missing explicit --model flag: %q", script)
+	}
 	if !strings.Contains(script, "YOLO mode is enabled\\. All tool calls will be automatically approved\\.") {
 		t.Fatalf("geminiAgentScript() missing YOLO banner cleanup filter: %q", script)
 	}
