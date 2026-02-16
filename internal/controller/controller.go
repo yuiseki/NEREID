@@ -566,6 +566,9 @@ description: Extract reusable lessons from this session and persist them as loca
   4. Failure signals and fallback
 - Use lowercase letters, digits, and hyphens for <skill-name>.
 - Add scripts/, references/, and assets/ only when needed.
+- Each created skill must be unique compared with existing skills in ./.gemini/skills and ./specials/skills.
+- Each created skill must be highly reproducible: include explicit prerequisites, stable inputs, deterministic steps, and expected outputs.
+- If an equivalent skill already exists, update that local session skill instead of creating a duplicate.
 - Never include secrets, environment variables, or user-private sensitive content.
 
 ## Scope
