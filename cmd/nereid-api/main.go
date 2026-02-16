@@ -484,6 +484,7 @@ fi
 GEMINI_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
 GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"
 CREATE_SKILLS_SKILL_FILE="${OUT_DIR}/.gemini/skills/create-skills/SKILL.md"
+KIND_OSMABLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/osmable-v1/SKILL.md"
 KIND_OVERPASS_SKILL_FILE="${OUT_DIR}/.gemini/skills/overpassql-map-v1/SKILL.md"
 KIND_STYLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/maplibre-style-v1/SKILL.md"
 KIND_DUCKDB_SKILL_FILE="${OUT_DIR}/.gemini/skills/duckdb-map-v1/SKILL.md"
@@ -492,6 +493,7 @@ KIND_LAZ_SKILL_FILE="${OUT_DIR}/.gemini/skills/laz-3dtiles-v1/SKILL.md"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 mkdir -p "${GEMINI_SKILL_DIR}" \
   "$(dirname "${CREATE_SKILLS_SKILL_FILE}")" \
+  "$(dirname "${KIND_OSMABLE_SKILL_FILE}")" \
   "$(dirname "${KIND_OVERPASS_SKILL_FILE}")" \
   "$(dirname "${KIND_STYLE_SKILL_FILE}")" \
   "$(dirname "${KIND_DUCKDB_SKILL_FILE}")" \
@@ -577,6 +579,35 @@ description: Extract reusable lessons from this session and persist them as loca
 - Do not modify global NEREID runtime code or external skill repositories.
 SKILL_CREATE
 
+cat > "${KIND_OSMABLE_SKILL_FILE}" <<'SKILL_OSMABLE'
+---
+name: osmable-v1
+description: Use osmable CLI for deterministic OSM geocoding, AOI, POI, and routing workflows.
+---
+# osmable Workflow
+
+## When to use
+- User request involves OSM data retrieval or geospatial operations (Nominatim/Overpass/Valhalla).
+- You need deterministic CLI output instead of fragile free-form web scraping.
+
+## Core rules
+1. Prefer npx -y osmable ... over direct API calls for geocode/aoi/poi/route tasks.
+2. Use default text output for concise logs and context efficiency.
+3. Use --format json or --format geojson when machine-readable output is required.
+4. Run npx -y osmable doctor before relying on upstream endpoints for critical flows.
+
+## Common commands
+- Geocode: npx -y osmable geocode "東京都台東区" --format json
+- AOI: npx -y osmable aoi resolve "東京都台東区" --format geojson > aoi.geojson
+- POI count: npx -y osmable poi count --tag leisure=park --within "東京都台東区" --format json
+- POI fetch: npx -y osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > parks.geojson
+- Route: npx -y osmable route --from "上野駅" --to "浅草寺" --mode pedestrian --format json > route.json
+
+## Failure and fallback
+- If osmable fails, capture stderr and exit code in artifacts for debugging.
+- Fall back to direct curl/browser fetch only when osmable cannot satisfy the task.
+SKILL_OSMABLE
+
 cat > "${KIND_OVERPASS_SKILL_FILE}" <<'SKILL_OVERPASS'
 ---
 name: overpassql-map-v1
@@ -596,10 +627,11 @@ description: Decide when to use Overpass QL and how to design robust map data qu
 ## Recommended workflow
 1. Resolve target area from user instruction (city/ward/region).
 2. Build minimal Overpass QL with explicit tag filters.
-3. Execute Overpass directly with browser fetch or curl (not web_fetch).
-4. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
-5. Keep timeout and output size reasonable.
-6. Convert response to map-friendly geometry and render in index.html.
+3. Prefer npx -y osmable poi count/fetch for deterministic OSM retrieval.
+4. If manual Overpass execution is required, use browser fetch or curl (not web_fetch).
+5. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
+6. Keep timeout and output size reasonable.
+7. Convert response to map-friendly geometry and render in index.html.
 
 ## Output expectations
 - Store raw response for debugging.
@@ -723,13 +755,10 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - For structured JSON APIs (Overpass/Nominatim), DO NOT use web_fetch. Use curl/browser fetch directly.
 - Never call Overpass with raw query in ?data=. URL-encode query or use curl --data-urlencode.
 
-@./.gemini/skills/nereid-artifact-authoring/SKILL.md
-@./.gemini/skills/create-skills/SKILL.md
-@./.gemini/skills/overpassql-map-v1/SKILL.md
-@./.gemini/skills/maplibre-style-v1/SKILL.md
-@./.gemini/skills/duckdb-map-v1/SKILL.md
-@./.gemini/skills/gdal-rastertile-v1/SKILL.md
-@./.gemini/skills/laz-3dtiles-v1/SKILL.md
+## Skill policy
+- Workspace skills are available under ./.gemini/skills/.
+- Rely on Gemini skill discovery and activate_skill for progressive disclosure.
+- Do not pre-load all skill bodies at startup unless strictly required.
 
 ## Runtime facts
 - You are operating inside one NEREID artifact workspace.

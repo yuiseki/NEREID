@@ -361,6 +361,7 @@ func buildLegacyKindBridgeScript(kind string, spec map[string]interface{}) (stri
 
 	commonSkillB64 := base64.StdEncoding.EncodeToString([]byte(legacyCommonSkillDoc()))
 	createSkillsB64 := base64.StdEncoding.EncodeToString([]byte(legacyCreateSkillsSkillDoc()))
+	osmableSkillB64 := base64.StdEncoding.EncodeToString([]byte(legacyOsmableSkillDoc()))
 	kindSkillB64 := base64.StdEncoding.EncodeToString([]byte(skillDoc))
 	specB64 := base64.StdEncoding.EncodeToString(specJSON)
 	promptB64 := base64.StdEncoding.EncodeToString([]byte(legacyKindBridgePromptText(kind)))
@@ -376,11 +377,12 @@ PROMPT_FILE="${OUT_DIR}/legacy-kind-prompt.txt"
 SPEC_FILE="${OUT_DIR}/legacy-work-spec.json"
 COMMON_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
 CREATE_SKILLS_DIR="${OUT_DIR}/.gemini/skills/create-skills"
+OSMABLE_SKILL_DIR="${OUT_DIR}/.gemini/skills/osmable-v1"
 KIND_SKILL_DIR="${OUT_DIR}/.gemini/skills/%s"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 
 export HOME="${OUT_DIR}/.home"
-mkdir -p "${HOME}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${KIND_SKILL_DIR}"
+mkdir -p "${HOME}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${OSMABLE_SKILL_DIR}" "${KIND_SKILL_DIR}"
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
@@ -427,6 +429,9 @@ printf '%%s' "${COMMON_SKILL_B64}" | base64 -d > "${COMMON_SKILL_DIR}/SKILL.md"
 CREATE_SKILLS_B64=%q
 printf '%%s' "${CREATE_SKILLS_B64}" | base64 -d > "${CREATE_SKILLS_DIR}/SKILL.md"
 
+OSMABLE_SKILL_B64=%q
+printf '%%s' "${OSMABLE_SKILL_B64}" | base64 -d > "${OSMABLE_SKILL_DIR}/SKILL.md"
+
 KIND_SKILL_B64=%q
 printf '%%s' "${KIND_SKILL_B64}" | base64 -d > "${KIND_SKILL_DIR}/SKILL.md"
 
@@ -446,9 +451,10 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - For structured JSON APIs (Overpass/Nominatim), DO NOT use web_fetch. Use curl/browser fetch directly.
 - Never call Overpass with raw query in ?data=. URL-encode query or use curl --data-urlencode.
 
-@./.gemini/skills/nereid-artifact-authoring/SKILL.md
-@./.gemini/skills/create-skills/SKILL.md
-@./.gemini/skills/%s/SKILL.md
+## Skill policy
+- Workspace skills are available under ./.gemini/skills/.
+- Rely on Gemini skill discovery and activate_skill for progressive disclosure.
+- Do not pre-load all skill bodies at startup unless strictly required.
 
 ## Runtime facts
 - Legacy work specification is available at ./legacy-work-spec.json
@@ -514,7 +520,7 @@ fi
 
 cat "${OUT_TEXT}"
 exit "${status}"
-`, skillSlug, commonSkillB64, createSkillsB64, kindSkillB64, specB64, promptB64, skillSlug), nil
+`, skillSlug, commonSkillB64, createSkillsB64, osmableSkillB64, kindSkillB64, specB64, promptB64), nil
 }
 
 func legacyKindSkillSlug(kind string) string {
@@ -548,6 +554,7 @@ description: Create static-hostable HTML artifacts in NEREID workspace.
 - Never pass raw Overpass QL in a URL query string such as .../api/interpreter?data=[out:json]....
 - For Overpass requests, always URL-encode data (for example encodeURIComponent(query)) or use curl -G --data-urlencode.
 - If a structured API call fails, retry with curl/browser fetch; do not retry with web_fetch.
+- For OSM geocoding/AOI/POI/routing, prefer npx -y osmable ... for deterministic execution.
 
 ## Mapping defaults
 - For map requests, produce an interactive HTML map (MapLibre, Leaflet, or Cesium).
@@ -595,6 +602,36 @@ description: Extract reusable lessons from this session and persist them as loca
 `
 }
 
+func legacyOsmableSkillDoc() string {
+	return `---
+name: osmable-v1
+description: Use osmable CLI for deterministic OSM geocoding, AOI, POI, and routing workflows.
+---
+# osmable Workflow
+
+## When to use
+- Instruction involves OSM data retrieval or geospatial operations (Nominatim/Overpass/Valhalla).
+- Deterministic command output is preferred over fragile ad-hoc API calls.
+
+## Core rules
+1. Prefer npx -y osmable ... for geocode/aoi/poi/route tasks.
+2. Use default text output for concise logs.
+3. Use --format json or --format geojson when machine-readable output is required.
+4. Run npx -y osmable doctor before critical flows.
+
+## Common commands
+- Geocode: npx -y osmable geocode "東京都台東区" --format json
+- AOI: npx -y osmable aoi resolve "東京都台東区" --format geojson > aoi.geojson
+- POI count: npx -y osmable poi count --tag leisure=park --within "東京都台東区" --format json
+- POI fetch: npx -y osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > parks.geojson
+- Route: npx -y osmable route --from "上野駅" --to "浅草寺" --mode pedestrian --format json > route.json
+
+## Failure and fallback
+- If osmable fails, capture stderr and exit code in artifacts.
+- Fall back to direct curl/browser fetch only when osmable cannot satisfy the task.
+`
+}
+
 func legacyKindSkillDoc(kind string) (string, error) {
 	switch kind {
 	case "overpassql.map.v1":
@@ -616,9 +653,10 @@ description: Decide when to use Overpass QL and how to design robust map data qu
 ## Recommended workflow
 1. Read target area intent from instruction and/or spec.
 2. Build explicit tag filters with bounded scope.
-3. Execute Overpass directly with browser fetch or curl (not web_fetch).
-4. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
-5. Persist raw response and render map-friendly output.
+3. Prefer npx -y osmable poi count/fetch for deterministic OSM retrieval.
+4. If manual Overpass execution is required, use browser fetch or curl (not web_fetch).
+5. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
+6. Persist raw response and render map-friendly output.
 
 ## Output expectations
 - Keep index.html usable.

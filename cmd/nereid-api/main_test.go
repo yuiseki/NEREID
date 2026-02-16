@@ -180,14 +180,17 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, `SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"`) {
 		t.Fatalf("geminiAgentScript() missing specials/skills output directory: %q", script)
 	}
-	if !strings.Contains(script, "@./.gemini/skills/nereid-artifact-authoring/SKILL.md") {
-		t.Fatalf("geminiAgentScript() missing skill import in GEMINI.md: %q", script)
+	if !strings.Contains(script, `KIND_OSMABLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/osmable-v1/SKILL.md"`) {
+		t.Fatalf("geminiAgentScript() missing osmable skill generation: %q", script)
 	}
-	if !strings.Contains(script, "@./.gemini/skills/create-skills/SKILL.md") {
-		t.Fatalf("geminiAgentScript() missing create-skills import in GEMINI.md: %q", script)
+	if !strings.Contains(script, "npx -y osmable doctor") {
+		t.Fatalf("geminiAgentScript() missing osmable guidance in skill body: %q", script)
 	}
-	if !strings.Contains(script, "@./.gemini/skills/overpassql-map-v1/SKILL.md") {
-		t.Fatalf("geminiAgentScript() missing overpass strategy skill import: %q", script)
+	if !strings.Contains(script, "Workspace skills are available under ./.gemini/skills/.") {
+		t.Fatalf("geminiAgentScript() missing skill discovery policy in GEMINI.md: %q", script)
+	}
+	if strings.Contains(script, "@./.gemini/skills/") {
+		t.Fatalf("geminiAgentScript() should not eager-load skill bodies via @ imports: %q", script)
 	}
 	if strings.Contains(script, "/.gemini/skills/legacy-") {
 		t.Fatalf("geminiAgentScript() should not use legacy- prefixed skill paths: %q", script)

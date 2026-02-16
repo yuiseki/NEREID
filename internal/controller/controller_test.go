@@ -209,15 +209,24 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}\"",
 				"--model \"${GEMINI_CLI_MODEL}\"",
 				"legacy-kind-prompt.txt",
-				"@./.gemini/skills/create-skills/SKILL.md",
+				"OSMABLE_SKILL_DIR=\"${OUT_DIR}/.gemini/skills/osmable-v1\"",
+				"OSMABLE_SKILL_B64=\"",
 				"./specials/skills/",
 				legacyKindSkillSlug(legacyKind),
 				"DO NOT use web_fetch. Use curl/browser fetch directly.",
 				"Never call Overpass with raw query in ?data=",
+				"Workspace skills are available under ./.gemini/skills/.",
 			} {
 				if !strings.Contains(embedded, needle) {
 					t.Fatalf("embedded script missing %q\nscript:\n%s", needle, embedded)
 				}
+			}
+			osmableSkill := decodeEmbeddedB64Var(t, embedded, "OSMABLE_SKILL_B64")
+			if !strings.Contains(osmableSkill, "npx -y osmable doctor") {
+				t.Fatalf("decoded osmable skill missing doctor guidance:\n%s", osmableSkill)
+			}
+			if strings.Contains(embedded, "@./.gemini/skills/") {
+				t.Fatalf("embedded script should not eager-load skill bodies via @ imports:\n%s", embedded)
 			}
 		})
 	}
@@ -239,6 +248,26 @@ func decodeEmbeddedAgentScript(t *testing.T, wrapper string) string {
 	decoded, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
 		t.Fatalf("decode SCRIPT_B64: %v", err)
+	}
+	return string(decoded)
+}
+
+func decodeEmbeddedB64Var(t *testing.T, script, varName string) string {
+	t.Helper()
+	marker := varName + "=\""
+	start := strings.Index(script, marker)
+	if start < 0 {
+		t.Fatalf("%s marker not found in script:\n%s", varName, script)
+	}
+	start += len(marker)
+	end := strings.Index(script[start:], "\"")
+	if end < 0 {
+		t.Fatalf("%s closing quote not found in script:\n%s", varName, script)
+	}
+	b64 := script[start : start+end]
+	decoded, err := base64.StdEncoding.DecodeString(b64)
+	if err != nil {
+		t.Fatalf("decode %s: %v", varName, err)
 	}
 	return string(decoded)
 }
