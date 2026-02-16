@@ -10,6 +10,10 @@ data:
       listen 8080;
       server_name _;
       root /usr/share/nginx/html;
+      include /etc/nginx/mime.types;
+      types {
+        text/plain log;
+      }
 
       location = /static/artifacts {
         return 301 /;
