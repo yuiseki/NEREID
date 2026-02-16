@@ -375,14 +375,18 @@ OUT_TEXT="${OUT_DIR}/gemini-output.txt"
 OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
 PROMPT_FILE="${OUT_DIR}/legacy-kind-prompt.txt"
 SPEC_FILE="${OUT_DIR}/legacy-work-spec.json"
-COMMON_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
-CREATE_SKILLS_DIR="${OUT_DIR}/.gemini/skills/create-skills"
-OSMABLE_SKILL_DIR="${OUT_DIR}/.gemini/skills/osmable-v1"
-KIND_SKILL_DIR="${OUT_DIR}/.gemini/skills/%s"
+GEMINI_DIR="${OUT_DIR}/.gemini"
+GEMINI_SETTINGS_FILE="${GEMINI_DIR}/settings.json"
+GEMINI_HOOKS_DIR="${GEMINI_DIR}/hooks"
+INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"
+COMMON_SKILL_DIR="${GEMINI_DIR}/skills/nereid-artifact-authoring"
+CREATE_SKILLS_DIR="${GEMINI_DIR}/skills/create-skills"
+OSMABLE_SKILL_DIR="${GEMINI_DIR}/skills/osmable-v1"
+KIND_SKILL_DIR="${GEMINI_DIR}/skills/%s"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 
 export HOME="${OUT_DIR}/.home"
-mkdir -p "${HOME}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${OSMABLE_SKILL_DIR}" "${KIND_SKILL_DIR}"
+mkdir -p "${HOME}" "${GEMINI_HOOKS_DIR}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${OSMABLE_SKILL_DIR}" "${KIND_SKILL_DIR}"
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
@@ -440,6 +444,91 @@ printf '%%s' "${SPEC_B64}" | base64 -d > "${SPEC_FILE}"
 
 PROMPT_B64=%q
 printf '%%s' "${PROMPT_B64}" | base64 -d > "${PROMPT_FILE}"
+
+cat > "${INDEX_VALIDATE_HOOK_FILE}" <<'HOOK'
+#!/usr/bin/env bash
+set -eu
+
+HOOK_INPUT="$(cat || true)"
+IS_RETRY="false"
+if printf '%%s' "${HOOK_INPUT}" | tr -d '\n' | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+  IS_RETRY="true"
+fi
+
+PROJECT_DIR="${GEMINI_PROJECT_DIR:-${GEMINI_CWD:-$(pwd)}}"
+INDEX_FILE="${PROJECT_DIR}/index.html"
+RUNTIME_PATTERN="cannot read properties of undefined \\(reading 'lon'\\)|cannot read properties of undefined \\(reading 'lat'\\)|typeerror: cannot read properties of undefined"
+
+emit_allow() {
+  printf '{"decision":"allow"}\n'
+}
+
+emit_deny() {
+  local msg="$1"
+  msg=$(printf '%%s' "${msg}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"decision":"deny","reason":"%%s"}\n' "${msg}"
+}
+
+emit_stop() {
+  local msg="$1"
+  msg=$(printf '%%s' "${msg}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"continue":false,"stopReason":"%%s"}\n' "${msg}"
+}
+
+fail_validation() {
+  local msg="$1"
+  if [ "${IS_RETRY}" = "true" ]; then
+    emit_stop "index.html validation still failing after retry: ${msg}"
+  else
+    emit_deny "index.html validation failed: ${msg}"
+  fi
+  exit 0
+}
+
+if [ ! -s "${INDEX_FILE}" ]; then
+  fail_validation "index.html not found or empty. Create ./index.html with rendered result."
+fi
+
+if ! grep -Eqi '<!doctype html|<html[[:space:]>]|<body[[:space:]>]|<main[[:space:]>]|<div[[:space:]>]|<section[[:space:]>]|<canvas[[:space:]>]|<svg[[:space:]>]|<script[[:space:]>]|<h1[[:space:]>]|<p[[:space:]>]' "${INDEX_FILE}"; then
+  fail_validation "index.html does not look like renderable HTML."
+fi
+
+for path in \
+  "${PROJECT_DIR}/index.html" \
+  "${PROJECT_DIR}/gemini-output.txt" \
+  "${PROJECT_DIR}/agent.log" \
+  "${PROJECT_DIR}/dialogue.txt" \
+  "${PROJECT_DIR}/logs/agent.log" \
+  "${PROJECT_DIR}/logs/dialogue.txt"
+do
+  if [ -f "${path}" ] && grep -Eqi "${RUNTIME_PATTERN}" "${path}"; then
+    fail_validation "runtime error signature detected in ${path##*/}."
+  fi
+done
+
+emit_allow
+HOOK
+chmod +x "${INDEX_VALIDATE_HOOK_FILE}"
+
+cat > "${GEMINI_SETTINGS_FILE}" <<'SETTINGS'
+{
+  "hooks": {
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "validate-index-html",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+SETTINGS
 
 cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 # NEREID Legacy Kind Bridge

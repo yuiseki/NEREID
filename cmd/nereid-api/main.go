@@ -481,17 +481,22 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   exit 2
 fi
 
-GEMINI_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
+GEMINI_DIR="${OUT_DIR}/.gemini"
+GEMINI_SETTINGS_FILE="${GEMINI_DIR}/settings.json"
+GEMINI_HOOKS_DIR="${GEMINI_DIR}/hooks"
+INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"
+GEMINI_SKILL_DIR="${GEMINI_DIR}/skills/nereid-artifact-authoring"
 GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"
-CREATE_SKILLS_SKILL_FILE="${OUT_DIR}/.gemini/skills/create-skills/SKILL.md"
-KIND_OSMABLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/osmable-v1/SKILL.md"
-KIND_OVERPASS_SKILL_FILE="${OUT_DIR}/.gemini/skills/overpassql-map-v1/SKILL.md"
-KIND_STYLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/maplibre-style-v1/SKILL.md"
-KIND_DUCKDB_SKILL_FILE="${OUT_DIR}/.gemini/skills/duckdb-map-v1/SKILL.md"
-KIND_GDAL_SKILL_FILE="${OUT_DIR}/.gemini/skills/gdal-rastertile-v1/SKILL.md"
-KIND_LAZ_SKILL_FILE="${OUT_DIR}/.gemini/skills/laz-3dtiles-v1/SKILL.md"
+CREATE_SKILLS_SKILL_FILE="${GEMINI_DIR}/skills/create-skills/SKILL.md"
+KIND_OSMABLE_SKILL_FILE="${GEMINI_DIR}/skills/osmable-v1/SKILL.md"
+KIND_OVERPASS_SKILL_FILE="${GEMINI_DIR}/skills/overpassql-map-v1/SKILL.md"
+KIND_STYLE_SKILL_FILE="${GEMINI_DIR}/skills/maplibre-style-v1/SKILL.md"
+KIND_DUCKDB_SKILL_FILE="${GEMINI_DIR}/skills/duckdb-map-v1/SKILL.md"
+KIND_GDAL_SKILL_FILE="${GEMINI_DIR}/skills/gdal-rastertile-v1/SKILL.md"
+KIND_LAZ_SKILL_FILE="${GEMINI_DIR}/skills/laz-3dtiles-v1/SKILL.md"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 mkdir -p "${GEMINI_SKILL_DIR}" \
+  "${GEMINI_HOOKS_DIR}" \
   "$(dirname "${CREATE_SKILLS_SKILL_FILE}")" \
   "$(dirname "${KIND_OSMABLE_SKILL_FILE}")" \
   "$(dirname "${KIND_OVERPASS_SKILL_FILE}")" \
@@ -743,6 +748,91 @@ description: Decide when LAZ to 3DTiles flow is needed and how to structure 3D p
 - index.html must remain usable.
 - If conversion toolchain is unavailable, provide explicit fallback details in-page.
 SKILL_LAZ
+
+cat > "${INDEX_VALIDATE_HOOK_FILE}" <<'HOOK'
+#!/usr/bin/env bash
+set -eu
+
+HOOK_INPUT="$(cat || true)"
+IS_RETRY="false"
+if printf '%s' "${HOOK_INPUT}" | tr -d '\n' | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
+  IS_RETRY="true"
+fi
+
+PROJECT_DIR="${GEMINI_PROJECT_DIR:-${GEMINI_CWD:-$(pwd)}}"
+INDEX_FILE="${PROJECT_DIR}/index.html"
+RUNTIME_PATTERN="cannot read properties of undefined \\(reading 'lon'\\)|cannot read properties of undefined \\(reading 'lat'\\)|typeerror: cannot read properties of undefined"
+
+emit_allow() {
+  printf '{"decision":"allow"}\n'
+}
+
+emit_deny() {
+  local msg="$1"
+  msg=$(printf '%s' "${msg}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"decision":"deny","reason":"%s"}\n' "${msg}"
+}
+
+emit_stop() {
+  local msg="$1"
+  msg=$(printf '%s' "${msg}" | sed 's/\\/\\\\/g; s/"/\\"/g')
+  printf '{"continue":false,"stopReason":"%s"}\n' "${msg}"
+}
+
+fail_validation() {
+  local msg="$1"
+  if [ "${IS_RETRY}" = "true" ]; then
+    emit_stop "index.html validation still failing after retry: ${msg}"
+  else
+    emit_deny "index.html validation failed: ${msg}"
+  fi
+  exit 0
+}
+
+if [ ! -s "${INDEX_FILE}" ]; then
+  fail_validation "index.html not found or empty. Create ./index.html with rendered result."
+fi
+
+if ! grep -Eqi '<!doctype html|<html[[:space:]>]|<body[[:space:]>]|<main[[:space:]>]|<div[[:space:]>]|<section[[:space:]>]|<canvas[[:space:]>]|<svg[[:space:]>]|<script[[:space:]>]|<h1[[:space:]>]|<p[[:space:]>]' "${INDEX_FILE}"; then
+  fail_validation "index.html does not look like renderable HTML."
+fi
+
+for path in \
+  "${PROJECT_DIR}/index.html" \
+  "${PROJECT_DIR}/gemini-output.txt" \
+  "${PROJECT_DIR}/agent.log" \
+  "${PROJECT_DIR}/dialogue.txt" \
+  "${PROJECT_DIR}/logs/agent.log" \
+  "${PROJECT_DIR}/logs/dialogue.txt"
+do
+  if [ -f "${path}" ] && grep -Eqi "${RUNTIME_PATTERN}" "${path}"; then
+    fail_validation "runtime error signature detected in ${path##*/}."
+  fi
+done
+
+emit_allow
+HOOK
+chmod +x "${INDEX_VALIDATE_HOOK_FILE}"
+
+cat > "${GEMINI_SETTINGS_FILE}" <<'SETTINGS'
+{
+  "hooks": {
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "validate-index-html",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}
+SETTINGS
 
 cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 # NEREID Workspace Context

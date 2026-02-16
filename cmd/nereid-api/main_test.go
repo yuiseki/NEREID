@@ -174,14 +174,29 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, `GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"`) {
 		t.Fatalf("geminiAgentScript() missing skill generation: %q", script)
 	}
-	if !strings.Contains(script, `CREATE_SKILLS_SKILL_FILE="${OUT_DIR}/.gemini/skills/create-skills/SKILL.md"`) {
+	if !strings.Contains(script, `CREATE_SKILLS_SKILL_FILE="${GEMINI_DIR}/skills/create-skills/SKILL.md"`) {
 		t.Fatalf("geminiAgentScript() missing create-skills skill generation: %q", script)
 	}
 	if !strings.Contains(script, `SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"`) {
 		t.Fatalf("geminiAgentScript() missing specials/skills output directory: %q", script)
 	}
-	if !strings.Contains(script, `KIND_OSMABLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/osmable-v1/SKILL.md"`) {
+	if !strings.Contains(script, `KIND_OSMABLE_SKILL_FILE="${GEMINI_DIR}/skills/osmable-v1/SKILL.md"`) {
 		t.Fatalf("geminiAgentScript() missing osmable skill generation: %q", script)
+	}
+	if !strings.Contains(script, `GEMINI_SETTINGS_FILE="${GEMINI_DIR}/settings.json"`) {
+		t.Fatalf("geminiAgentScript() missing hooks settings generation path: %q", script)
+	}
+	if !strings.Contains(script, `INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"`) {
+		t.Fatalf("geminiAgentScript() missing index validation hook path: %q", script)
+	}
+	if !strings.Contains(script, `"AfterAgent"`) {
+		t.Fatalf("geminiAgentScript() missing AfterAgent hook configuration: %q", script)
+	}
+	if !strings.Contains(script, `"command": "$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh"`) {
+		t.Fatalf("geminiAgentScript() missing hook command path: %q", script)
+	}
+	if !strings.Contains(script, `{"decision":"deny","reason":"%s"}`) {
+		t.Fatalf("geminiAgentScript() missing hook deny output contract: %q", script)
 	}
 	if !strings.Contains(script, "npx -y osmable doctor") {
 		t.Fatalf("geminiAgentScript() missing osmable guidance in skill body: %q", script)
