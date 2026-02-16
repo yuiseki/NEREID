@@ -538,7 +538,6 @@ data:
           const stepSubmittedEl = document.getElementById("step-submitted");
           const stepRunningEl = document.getElementById("step-running");
           const stepSucceededEl = document.getElementById("step-succeeded");
-          let pollTimer = null;
           let stageTicker = null;
           let workStartedAt = 0;
           let lastPhase = "Idle";
@@ -895,13 +894,6 @@ data:
             submitBtn.textContent = busy ? "Submitting..." : "Generate Map";
           }
 
-          function stopPolling() {
-            if (pollTimer) {
-              clearInterval(pollTimer);
-              pollTimer = null;
-            }
-          }
-
           function stopStageTicker() {
             if (stageTicker) {
               clearInterval(stageTicker);
@@ -910,7 +902,6 @@ data:
           }
 
           function stopAllTimers() {
-            stopPolling();
             stopStageTicker();
           }
 
@@ -985,29 +976,6 @@ data:
                 updateStage(lastPhase, "");
               }
             }, 400);
-          }
-
-          async function pollStatus(workName) {
-            const ts = Date.now();
-            const res = await fetch("/api/status/" + encodeURIComponent(workName) + "?ts=" + ts, {
-              method: "GET",
-              cache: "no-store"
-            });
-            if (!res.ok) {
-              throw new Error("status API failed: " + res.status);
-            }
-            const j = await res.json();
-            const phase = j.phase || "Submitted";
-            updateStage(phase, j.message || "");
-            statusEl.textContent = phase === "Succeeded" ? "Completed. Redirecting to embed..." : "Work in progress... (" + phase + ")";
-            if (phase === "Succeeded") {
-              stopAllTimers();
-              setTimeout(() => { window.location.href = embedURLForWork(workName); }, 250);
-            } else if (phase === "Failed" || phase === "Error") {
-              stopAllTimers();
-              setBusy(false);
-              statusEl.textContent = "Failed: " + (j.message || "unknown error");
-            }
           }
 
           if (isEmbedMode) {
