@@ -562,6 +562,7 @@ data:
           const isEmbedMode = window.location.pathname.replace(/\/+$/, "") === "/embed";
           const workHistoryStorageKey = "nereid.recentWorkIds.v1";
           const workHistoryLimit = 40;
+          let followupAllowed = false;
 
           function normalizeArtifactUrl(raw) {
             const v = String(raw || "").trim();
@@ -654,11 +655,37 @@ data:
             renderRecentWorks();
           }
 
-          function setEmbedFrameWaiting(message) {
+          function setEmbedFrameWaiting(message, phase) {
             const body = escapeHTML(message || "Waiting for artifact...");
+            const phaseText = String(phase || "waiting").trim().toUpperCase();
+            let progress = 12;
+            let chipBg = "#2f6fff";
+            if (phaseText === "SUBMITTED" || phaseText === "QUEUED") {
+              progress = 28;
+              chipBg = "#2f6fff";
+            } else if (phaseText === "RUNNING") {
+              progress = 72;
+              chipBg = "#17a188";
+            } else if (phaseText === "FAILED" || phaseText === "ERROR") {
+              progress = 100;
+              chipBg = "#cc3a3a";
+            }
             embedFrameEl.removeAttribute("src");
-            embedFrameEl.srcdoc = "<!doctype html><html><body style=\"margin:0;display:grid;place-items:center;height:100%;font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace;color:#355a83;background:#f5f8fc;\">"
-              + "<div>" + body + "</div></body></html>";
+            embedFrameEl.srcdoc =
+              "<!doctype html><html><body style=\"margin:0;display:grid;place-items:center;height:100%;font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,'Liberation Mono',monospace;color:#355a83;background:#f5f8fc;\">"
+              + "<div style=\"width:min(640px,92vw);background:#fff;border:1px solid #cfddf0;border-radius:14px;padding:14px 14px 12px;box-shadow:0 8px 26px rgba(20,56,98,0.10);\">"
+              + "<div style=\"display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px;\">"
+              + "<strong style=\"font-size:12px;color:#244d7a;letter-spacing:0.05em;\">Artifact Status</strong>"
+              + "<span style=\"display:inline-block;border-radius:999px;padding:3px 10px;font-size:11px;font-weight:800;letter-spacing:0.06em;color:#fff;background:" + chipBg + ";\">"
+              + escapeHTML(phaseText || "WAITING")
+              + "</span></div>"
+              + "<div style=\"height:10px;border-radius:999px;overflow:hidden;background:#e6eef8;border:1px solid #d0deef;\">"
+              + "<div style=\"height:100%;width:" + String(progress) + "%;background:linear-gradient(90deg,#2f6fff,#20b69d,#ff8a2c);background-size:200% 100%;animation:nereid-wait-move 1.2s linear infinite;\"></div>"
+              + "</div>"
+              + "<div style=\"margin-top:9px;color:#355a83;\">" + body + "</div>"
+              + "</div>"
+              + "<style>@keyframes nereid-wait-move{to{background-position:200% 0;}}</style>"
+              + "</body></html>";
           }
 
           function readEmbedText(el) {
@@ -670,9 +697,21 @@ data:
 
           function setFollowupBusy(busy) {
             if (!followupBtnEl || !followupInputEl) return;
-            followupBtnEl.disabled = busy;
-            followupInputEl.disabled = busy;
+            const disabled = busy || !followupAllowed;
+            followupBtnEl.disabled = disabled;
+            followupInputEl.disabled = disabled;
             followupBtnEl.textContent = busy ? "Submitting..." : "Send Follow-up";
+          }
+
+          function setFollowupAllowed(allowed, waitingMessage) {
+            followupAllowed = !!allowed;
+            setFollowupBusy(false);
+            if (!followupAllowed && followupStatusEl && waitingMessage) {
+              followupStatusEl.textContent = waitingMessage;
+            }
+            if (followupAllowed && followupStatusEl && /^Work /.test(followupStatusEl.textContent || "")) {
+              followupStatusEl.textContent = "";
+            }
           }
 
           async function initEmbedMode() {
@@ -682,6 +721,7 @@ data:
             const params = new URLSearchParams(window.location.search);
             const workName = (params.get("work") || "").trim();
             if (workName) rememberWorkID(workName);
+            setFollowupAllowed(false, "Work is not ready yet.");
             let artifactUrl = normalizeArtifactUrl(params.get("artifact") || params.get("url"));
 
             if (!artifactUrl && workName) {
@@ -702,7 +742,7 @@ data:
             }
 
             let frameReady = false;
-            setEmbedFrameWaiting("Waiting for artifact...");
+            setEmbedFrameWaiting("Waiting for artifact...", "Submitted");
             if (workName) {
               embedOpenEl.style.display = "";
               embedOpenEl.href = embedURLForWork(workName);
@@ -770,7 +810,9 @@ data:
                   if (statusArtifact) artifactUrl = statusArtifact;
                   embedMetaEl.textContent = "Work: " + workName + " / phase=" + phase + (message ? (" / " + message) : "");
                 } catch (e) {
-                  embedMetaEl.textContent = "Work: " + workName + " / status error: " + e.message;
+                  phase = "Running";
+                  message = "status error: " + e.message;
+                  embedMetaEl.textContent = "Work: " + workName + " / " + message;
                 }
               }
 
@@ -780,17 +822,24 @@ data:
                   embedFrameEl.src = artifactUrl;
                   frameReady = true;
                 } else if (phase === "Failed" || phase === "Error") {
-                  setEmbedFrameWaiting("Work failed before artifact became available.");
+                  setEmbedFrameWaiting("Work failed before artifact became available.", phase || "Failed");
                 } else if (phase === "Running") {
-                  setEmbedFrameWaiting("Work is running. Opening artifact when ready...");
+                  setEmbedFrameWaiting("Work is running. Opening artifact when ready...", "Running");
                 } else if (phase === "Queued" || phase === "Submitted") {
-                  setEmbedFrameWaiting("Work submitted. Waiting for queue admission...");
+                  setEmbedFrameWaiting("Work submitted. Waiting for queue admission...", phase || "Submitted");
                 } else {
-                  setEmbedFrameWaiting("Waiting for work status...");
+                  setEmbedFrameWaiting("Waiting for work status...", phase || "Waiting");
                 }
               }
 
               const canReadArtifacts = !workName || phase === "Succeeded" || phase === "Failed" || phase === "Error";
+              if (workName) {
+                if (canReadArtifacts) {
+                  setFollowupAllowed(true, "");
+                } else {
+                  setFollowupAllowed(false, "Work phase is " + (phase || "Submitted") + ". Follow-up is enabled after completion.");
+                }
+              }
               if (!canReadArtifacts) {
                 embedUserEl.textContent = "(not found yet)";
                 embedDialogueEl.textContent = "(not found yet)";

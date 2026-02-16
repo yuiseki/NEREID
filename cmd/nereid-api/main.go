@@ -369,23 +369,32 @@ func composeAgentPrompt(prompt, parentWork, followupContext string) string {
 		followupContext = strings.TrimSpace(string([]byte(followupContext)[:maxFollowupContextBytes]))
 	}
 
-	if parentWork == "" && followupContext == "" {
-		return prompt
-	}
-
 	var b strings.Builder
-	b.WriteString("This is a follow-up request.")
+	b.WriteString(`You are operating inside NEREID artifact workspace.
+Mandatory output contract:
+- You MUST create or update ./index.html in the current directory.
+- You have shell access; write files to disk with commands, not only with narrative text.
+- Do not finish with explanation-only output. Persist files before finishing.
+- If user prompt has multiple bullet/line instructions, treat each line independently.
+- For multiple lines, create one HTML per line (example: task-01.html, task-02.html, ...), and make ./index.html link to all tasks.
+- For map requests, produce an interactive map view in HTML (MapLibre/Leaflet/Cesium are acceptable).
+- Keep generated files self-contained and directly viewable from static hosting.
+- Finish only after writing HTML artifacts to disk.
+`)
+	if parentWork != "" || followupContext != "" {
+		b.WriteString("\n\nThis is a follow-up request.")
+	}
 	if parentWork != "" {
 		b.WriteString(" Previous work: ")
 		b.WriteString(parentWork)
 		b.WriteString(".")
 	}
-	b.WriteString("\n\n")
 	if followupContext != "" {
+		b.WriteString("\n\n")
 		b.WriteString("Previous context:\n")
 		b.WriteString(followupContext)
-		b.WriteString("\n\n")
 	}
+	b.WriteString("\n\n")
 	b.WriteString("New instruction:\n")
 	b.WriteString(prompt)
 	return b.String()
@@ -430,6 +439,9 @@ OUT_DIR="${NEREID_ARTIFACT_DIR:-/artifacts/${NEREID_WORK_NAME:-work}}"
 mkdir -p "${OUT_DIR}"
 PROMPT_FILE="${OUT_DIR}/user-input.txt"
 OUT_TEXT="${OUT_DIR}/gemini-output.txt"
+TMP_HTML="${OUT_DIR}/index.generated.tmp.html"
+export HOME="${OUT_DIR}/.home"
+mkdir -p "${HOME}"
 
 if [ ! -s "${PROMPT_FILE}" ]; then
   printf '%s\n' "No user prompt found in ${PROMPT_FILE}" > "${OUT_TEXT}"
@@ -443,11 +455,62 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   exit 2
 fi
 
+cd "${OUT_DIR}"
 set +e
 npx -y @google/gemini-cli -p "$(cat "${PROMPT_FILE}")" --output-format text --approval-mode yolo > "${OUT_TEXT}" 2>&1
 status=$?
 set -e
 
+if [ ! -s "${OUT_DIR}/index.html" ]; then
+  awk '
+    BEGIN {
+      tick = sprintf("%c", 96)
+      fence = tick tick tick
+    }
+    !in_html && $0 ~ ("^" fence "[[:space:]]*html[[:space:]]*$") { in_html=1; next }
+    in_html && $0 ~ ("^" fence "[[:space:]]*$") { in_html=0; exit }
+    { if (in_html) print }
+  ' "${OUT_TEXT}" > "${TMP_HTML}" || true
+
+  if [ ! -s "${TMP_HTML}" ]; then
+    awk '
+      BEGIN {
+        tick = sprintf("%c", 96)
+        fence = tick tick tick
+      }
+      !in_any && $0 ~ ("^" fence) { in_any=1; next }
+      in_any && $0 ~ ("^" fence "[[:space:]]*$") { in_any=0; exit }
+      { if (in_any) print }
+    ' "${OUT_TEXT}" > "${TMP_HTML}" || true
+  fi
+
+  if [ -s "${TMP_HTML}" ]; then
+    if grep -Eqi "<html|<!doctype html>" "${TMP_HTML}"; then
+      mv "${TMP_HTML}" "${OUT_DIR}/index.html"
+    elif grep -Eqi "<(body|script|style|div|section|main|h1|h2|p|ul|ol|table|canvas|svg|iframe|map)" "${TMP_HTML}"; then
+      cat > "${OUT_DIR}/index.html" <<'HTMLHEAD'
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>NEREID Gemini HTML</title>
+  </head>
+  <body>
+HTMLHEAD
+      cat "${TMP_HTML}" >> "${OUT_DIR}/index.html"
+      cat >> "${OUT_DIR}/index.html" <<'HTMLTAIL'
+  </body>
+</html>
+HTMLTAIL
+      rm -f "${TMP_HTML}"
+    else
+      rm -f "${TMP_HTML}"
+    fi
+  fi
+fi
+
+if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTML'
 <!doctype html>
 <html>
@@ -478,6 +541,7 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
   </body>
 </html>
 HTML
+fi
 
 cat "${OUT_TEXT}"
 exit "${status}"
