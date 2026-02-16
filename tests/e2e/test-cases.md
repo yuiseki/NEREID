@@ -5,7 +5,7 @@ Target: `https://nereid.yuiseki.net/`
 Each case verifies this flow on the real site:
 1. Open top page (`/`).
 2. Submit prompt from UI.
-3. Redirect to `/embed?work=<workId>`.
+3. Redirect to `/works/<workId>`.
 4. `workId` format is valid.
 5. `/api/status/<workId>` is reachable and returns known phase.
 

@@ -86,11 +86,12 @@ async (page) => {
   await page.waitForSelector('#prompt-input', { timeout: 15000 });
   await page.fill('#prompt-input', prompt);
   await page.click('#submit-btn');
-  await page.waitForURL(/\/embed\?work=/, { timeout: 45000 });
+  await page.waitForURL(/\/works\//, { timeout: 45000 });
 
   const url = page.url();
-  const m = url.match(/[?&]work=([^&]+)/);
-  const workId = m ? decodeURIComponent(m[1]) : '';
+  const pathMatch = url.match(/\/works\/([^/?#]+)/);
+  const queryMatch = url.match(/[?&]work=([^&]+)/);
+  const workId = pathMatch ? decodeURIComponent(pathMatch[1]) : (queryMatch ? decodeURIComponent(queryMatch[1]) : '');
   if (!/^[a-z0-9][a-z0-9-]{10,252}$/.test(workId)) {
     throw new Error('invalid workId: ' + workId + ' url=' + url);
   }

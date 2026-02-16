@@ -802,7 +802,7 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
       <li><a href="./logs/instructions.csv">logs/instructions.csv</a></li>
       <li><a href="./specials/">specials/</a></li>
       <li><a href="./specials/skills/">specials/skills/</a></li>
-      <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
+      <li><a href="https://nereid.yuiseki.net/works/%s">open work</a></li>
     </ul>
   </body>
 </html>
@@ -887,7 +887,7 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
       <li><a href="./logs/instructions.csv">logs/instructions.csv</a></li>
       <li><a href="./specials/">specials/</a></li>
       <li><a href="./specials/skills/">specials/skills/</a></li>
-      <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
+      <li><a href="https://nereid.yuiseki.net/works/%s">open work</a></li>
     </ul>
   </body>
 </html>

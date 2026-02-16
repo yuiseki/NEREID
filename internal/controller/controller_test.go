@@ -194,7 +194,7 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"agent.log",
 				"SPECIALS_DIR=\"${OUT_DIR}/specials\"",
 				"SPECIALS_SKILLS_DIR=\"${SPECIALS_DIR}/skills\"",
-				"https://nereid.yuiseki.net/embed?work=legacy-kind-sample",
+				"https://nereid.yuiseki.net/works/legacy-kind-sample",
 			} {
 				if !strings.Contains(wrapper, needle) {
 					t.Fatalf("wrapper script missing %q\nscript:\n%s", needle, wrapper)
@@ -295,7 +295,7 @@ func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {
 		"dialogue.txt",
 		"agent.log",
 		"./specials/skills/",
-		"https://nereid.yuiseki.net/embed?work=agent-cli-sample",
+		"https://nereid.yuiseki.net/works/agent-cli-sample",
 		"'@google/gemini-cli'",
 	} {
 		if !strings.Contains(script, needle) {

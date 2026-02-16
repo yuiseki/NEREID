@@ -494,7 +494,7 @@ data:
               <strong>NEREID Embed</strong>
               <div id="embed-meta" class="mono"></div>
             </div>
-            <a id="embed-open" class="ghost" target="_blank" rel="noopener noreferrer">Open Embed</a>
+            <a id="embed-open" class="ghost" target="_blank" rel="noopener noreferrer">Open Work</a>
           </section>
           <section class="embed-grid">
             <aside class="embed-log">
@@ -559,7 +559,17 @@ data:
           const rawArtifactsBase = "{{ .Values.artifacts.publicBaseUrl }}".replace(/\/+$/, "");
           const pageIsHTTPS = window.location.protocol === "https:";
           const defaultArtifactsBase = pageIsHTTPS ? rawArtifactsBase.replace(/^http:\/\//i, "https://") : rawArtifactsBase;
-          const isEmbedMode = window.location.pathname.replace(/\/+$/, "") === "/embed";
+          const normalizedPath = (window.location.pathname || "/").replace(/\/+$/, "") || "/";
+          const worksPathMatch = normalizedPath.match(/^\/works\/([^\/?#]+)$/);
+          let workNameFromPath = "";
+          if (worksPathMatch && worksPathMatch[1]) {
+            try {
+              workNameFromPath = decodeURIComponent(worksPathMatch[1]).trim();
+            } catch (_) {
+              workNameFromPath = String(worksPathMatch[1] || "").trim();
+            }
+          }
+          const isEmbedMode = normalizedPath === "/embed" || workNameFromPath !== "";
           const workHistoryStorageKey = "nereid.recentWorkIds.v1";
           const workHistoryLimit = 40;
           let followupAllowed = false;
@@ -581,7 +591,7 @@ data:
 
           function embedURLForWork(workName) {
             if (!workName) return "/embed";
-            return "/embed?work=" + encodeURIComponent(workName);
+            return "/works/" + encodeURIComponent(workName);
           }
 
           async function fetchStatus(workName) {
@@ -746,10 +756,13 @@ data:
             if (embedShellEl) embedShellEl.style.display = "block";
 
             const params = new URLSearchParams(window.location.search);
-            const workName = (params.get("work") || "").trim();
+            const workName = (workNameFromPath || params.get("work") || "").trim();
             if (workName) rememberWorkID(workName);
             setFollowupAllowed(false, "Work is not ready yet.");
             let artifactUrl = normalizeArtifactUrl(params.get("artifact") || params.get("url"));
+            if (normalizedPath === "/embed" && workNameFromPath === "" && workName && !artifactUrl) {
+              window.history.replaceState(null, "", embedURLForWork(workName));
+            }
 
             if (!artifactUrl && workName) {
               try {
@@ -773,7 +786,7 @@ data:
             if (workName) {
               embedOpenEl.style.display = "";
               embedOpenEl.href = embedURLForWork(workName);
-              embedOpenEl.textContent = "Open Embed";
+              embedOpenEl.textContent = "Open Work";
               if (embedFollowupEl) embedFollowupEl.style.display = "";
             } else {
               embedOpenEl.style.display = "none";
@@ -1032,7 +1045,7 @@ data:
                 const workName = j.workName;
                 rememberWorkID(workName);
                 workNameEl.textContent = "Work: " + workName;
-                artifactEl.textContent = "Redirecting to /embed...";
+                artifactEl.textContent = "Redirecting to /works/" + workName + "...";
                 updateStage("Submitted", "Submitted. Opening embed...");
                 statusEl.textContent = "Work in progress... (Submitted)";
                 window.location.href = embedURLForWork(workName);

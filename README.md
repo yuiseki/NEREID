@@ -80,7 +80,7 @@ WORK_NAME=$(./bin/nereid submit examples/works/codex-cli.yaml -n nereid -o name 
 - `spec.agent.image` (required)
 - `spec.agent.script` (shell script)
 - `spec.agent.command` + `spec.agent.args` (array-of-strings command mode)
-- Playground UI submits Gemini tasks via `/api/submit-agent` and `/embed` provides follow-up submission.
+- Playground UI submits Gemini tasks via `/api/submit-agent` and `/works/<work-name>` provides follow-up submission.
 
 The controller injects `NEREID_WORK_NAME` and `NEREID_ARTIFACT_DIR` into the container, and also applies `Grant.spec.env`, so API keys such as `OPENAI_API_KEY` / `GEMINI_API_KEY` can be passed safely via Secret refs.
 
@@ -98,10 +98,11 @@ For Gemini CLI workloads submitted from `/api/submit-agent`:
 
 Embed view:
 
-- `https://nereid.yuiseki.net/embed?work=<work-name>`
+- `https://nereid.yuiseki.net/works/<work-name>` (recommended)
+- `https://nereid.yuiseki.net/embed?work=<work-name>` (legacy-compatible)
 - or `https://nereid.yuiseki.net/embed?artifact=<artifact-url>`
 
-`/embed` shows `user-input.txt` / `dialogue.txt` / `agent.log` and an iframe preview of the artifact.
+`/works/<work-name>` and `/embed` show `user-input.txt` / `dialogue.txt` / `agent.log` and an iframe preview of the artifact.
 
 ```bash
 WORK_NAME=$(nereid submit examples/works/overpassql.yaml -n nereid -o name | cut -d/ -f2)
