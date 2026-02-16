@@ -13,6 +13,7 @@ description: Use osmable CLI for deterministic OSM geocoding, AOI, POI, and rout
 2. Use default text output for concise logs and context efficiency.
 3. Use --format json or --format geojson when machine-readable output is required.
 4. Run osmable doctor before relying on upstream endpoints for critical flows.
+5. There is no dedicated tool named `osmable_v1`; always execute `osmable ...` via shell command tool.
 
 ## Common commands
 - Geocode: osmable geocode "東京都台東区" --format json

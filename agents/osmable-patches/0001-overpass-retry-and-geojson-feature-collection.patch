@@ -1,0 +1,197 @@
+diff --git a/src/commands/poi-fetch.ts b/src/commands/poi-fetch.ts
+index 56fef64..d1bd457 100644
+--- a/src/commands/poi-fetch.ts
++++ b/src/commands/poi-fetch.ts
+@@ -92,7 +92,11 @@ export const runPoiFetch = async (options: PoiFetchOptions): Promise<void> => {
+ 	const bbox = await resolveWithinBbox(options.within);
+ 	const query = buildOverpassQuery({ tag, bbox, output: "geom" });
+ 	const data = await fetchOverpass(query);
+-	const geojson = osm2geojson(data) as GeoJsonFeatureCollection;
++	const geojson = osm2geojson(data, {
++		completeFeature: true,
++		renderTagged: true,
++		excludeWay: false,
++	}) as GeoJsonFeatureCollection;
+ 
+ 	if (!geojson || geojson.type !== "FeatureCollection") {
+ 		throw new OsmableError({
+diff --git a/src/commands/poi-shared.ts b/src/commands/poi-shared.ts
+index 24fbb0f..ddb89e2 100644
+--- a/src/commands/poi-shared.ts
++++ b/src/commands/poi-shared.ts
+@@ -34,6 +34,7 @@ type NominatimSearchResult = {
+ 
+ const DEFAULT_NOMINATIM_HOST = "https://nominatim.yuiseki.net";
+ const DEFAULT_OVERPASS_HOST = "https://overpass.yuiseki.net";
++const OVERPASS_RETRY_DELAYS_MS = [0, 1200, 2500, 5000, 8000];
+ 
+ const PRESET_TAGS: Record<string, string> = {
+ 	cafe: "amenity=cafe",
+@@ -41,6 +42,23 @@ const PRESET_TAGS: Record<string, string> = {
+ 	station: "railway=station",
+ };
+ 
++const sleep = async (ms: number): Promise<void> =>
++	new Promise((resolve) => setTimeout(resolve, ms));
++
++const looksLikeJsonText = (text: string): boolean => {
++	const trimmed = text.trimStart();
++	return trimmed.startsWith("{") || trimmed.startsWith("[");
++};
++
++const isTransientOverpassBody = (text: string): boolean => {
++	const lower = text.toLowerCase();
++	return (
++		lower.includes("duplicate_query") ||
++		lower.includes("dispatcher_client::request_read_and_idx::duplicate_query") ||
++		lower.includes("runtime error: open64")
++	);
++};
++
+ const parseTag = (tag: string): { key: string; value: string; raw: string } => {
+ 	const [key, value] = tag.split("=");
+ 	if (!key || value === undefined || value.length === 0) {
+@@ -272,44 +290,107 @@ export const fetchOverpass = async (query: string): Promise<unknown> => {
+ 	}
+ 
+ 	const url = new URL("/api/interpreter", host);
+-	const response = await fetch(url, {
+-		method: "POST",
+-		headers: {
+-			"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+-			"User-Agent": "osmable/0.1.0 (cli)",
+-		},
+-		body: new URLSearchParams({ data: query }),
+-	});
+-	if (!response.ok) {
+-		throw new OsmableError({
+-			code:
+-				response.status >= 500 ? "UPSTREAM_TEMPORARY" : "UPSTREAM_PERMANENT",
+-			message: `Overpass error: ${response.status} ${response.statusText}`,
+-		});
+-	}
+-	const contentType = response.headers.get("content-type") ?? "";
+-	if (!contentType.includes("application/json")) {
++	let lastError: OsmableError | null = null;
++	for (
++		let attempt = 0;
++		attempt < OVERPASS_RETRY_DELAYS_MS.length;
++		attempt += 1
++	) {
++		const delayMs = OVERPASS_RETRY_DELAYS_MS[attempt] ?? 0;
++		if (delayMs > 0) {
++			await sleep(delayMs);
++		}
++
++		let response: Response;
++		try {
++			// Add a tiny unique marker from second attempt onward to avoid duplicate-query locks.
++			const attemptQuery =
++				attempt === 0
++					? query
++					: `${query}\n/* osmable-retry-${Date.now()}-${attempt} */`;
++			response = await fetch(url, {
++				method: "POST",
++				headers: {
++					"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
++					"User-Agent": "osmable/0.1.0 (cli)",
++				},
++				body: new URLSearchParams({ data: attemptQuery }),
++			});
++		} catch (error) {
++			lastError = new OsmableError({
++				code: "UPSTREAM_TEMPORARY",
++				message: "Overpass error: request failed",
++			});
++			if (attempt + 1 < OVERPASS_RETRY_DELAYS_MS.length) {
++				continue;
++			}
++			break;
++		}
++
++		if (!response.ok) {
++			lastError = new OsmableError({
++				code:
++					response.status >= 500 ? "UPSTREAM_TEMPORARY" : "UPSTREAM_PERMANENT",
++				message: `Overpass error: ${response.status} ${response.statusText}`,
++			});
++			if (
++				response.status >= 500 &&
++				attempt + 1 < OVERPASS_RETRY_DELAYS_MS.length
++			) {
++				continue;
++			}
++			break;
++		}
++
++		const contentType = response.headers.get("content-type") ?? "";
+ 		const body = await response.text();
+-		const snippet = body.trim().slice(0, 200);
+-		throw new OsmableError({
+-			code: "UPSTREAM_PERMANENT",
+-			message: "Overpass error: non-JSON response",
+-			hints: {
+-				note: "Upstream returned an HTML/XML error page; check server configuration. Retrying likely won't help.",
+-			},
+-			candidates: snippet ? [{ snippet }] : undefined,
+-		});
++
++		if (
++			!contentType.includes("application/json") &&
++			isTransientOverpassBody(body)
++		) {
++			lastError = new OsmableError({
++				code: "UPSTREAM_TEMPORARY",
++				message: "Overpass error: temporary runtime failure",
++			});
++			if (attempt + 1 < OVERPASS_RETRY_DELAYS_MS.length) {
++				continue;
++			}
++			break;
++		}
++
++		if (!contentType.includes("application/json") && !looksLikeJsonText(body)) {
++			const snippet = body.trim().slice(0, 200);
++			lastError = new OsmableError({
++				code: "UPSTREAM_PERMANENT",
++				message: "Overpass error: non-JSON response",
++				hints: {
++					note: "Upstream returned an HTML/XML error page; check server configuration. Retrying likely won't help.",
++				},
++				candidates: snippet ? [{ snippet }] : undefined,
++			});
++			break;
++		}
++
++		try {
++			return JSON.parse(body);
++		} catch (error) {
++			lastError = new OsmableError({
++				code: "UPSTREAM_PERMANENT",
++				message: "Overpass error: invalid JSON response",
++				hints: {
++					note: "Upstream returned invalid JSON. This usually indicates a server-side error; retrying is unlikely to help.",
++				},
++			});
++			break;
++		}
+ 	}
+ 
+-	try {
+-		return await response.json();
+-	} catch (error) {
+-		throw new OsmableError({
+-			code: "UPSTREAM_PERMANENT",
+-			message: "Overpass error: invalid JSON response",
+-			hints: {
+-				note: "Upstream returned invalid JSON. This usually indicates a server-side error; retrying is unlikely to help.",
+-			},
+-		});
++	if (lastError) {
++		throw lastError;
+ 	}
++	throw new OsmableError({
++		code: "UPSTREAM_TEMPORARY",
++		message: "Overpass error: retry exhausted",
++	});
+ };

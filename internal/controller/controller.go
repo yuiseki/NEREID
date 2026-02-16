@@ -506,7 +506,17 @@ GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}"
 GEMINI_TIMEOUT_SECONDS="${NEREID_GEMINI_TIMEOUT_SECONDS:-180}"
 rm -f "${OUT_TEXT_PIPE}" "${OUT_TEXT_RAW}"
 mkfifo "${OUT_TEXT_PIPE}"
-tee "${OUT_TEXT_RAW}" < "${OUT_TEXT_PIPE}" &
+tee "${OUT_TEXT_RAW}" < "${OUT_TEXT_PIPE}" | sed -u \
+  -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
+  -e '/^npm[[:space:]]\+notice/d' \
+  -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
+  -e '/^WARNING: The following project-level hooks have been detected in this workspace:/,/remove them/d' \
+  -e '/project-level hooks have been detected in this workspace/d' \
+  -e '/If you did not configure these hooks or do not trust this project/d' \
+  -e '/These hooks will be executed/d' \
+  -e '/please review the project settings (.gemini\/settings.json) and remove them/d' \
+  -e '/^Hook registry initialized with [0-9][0-9]* hook entries$/d' \
+  -e '/Hook registry initialized with [0-9][0-9]* hook entries/d' &
 TEE_PID=$!
 set +e
 if command -v timeout >/dev/null 2>&1; then
@@ -527,7 +537,12 @@ if ! sed \
   -e '/^npm[[:space:]]\+notice/d' \
   -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
   -e '/^WARNING: The following project-level hooks have been detected in this workspace:/,/remove them/d' \
+  -e '/project-level hooks have been detected in this workspace/d' \
+  -e '/If you did not configure these hooks or do not trust this project/d' \
+  -e '/These hooks will be executed/d' \
+  -e '/please review the project settings (.gemini\/settings.json) and remove them/d' \
   -e '/^Hook registry initialized with [0-9][0-9]* hook entries$/d' \
+  -e '/Hook registry initialized with [0-9][0-9]* hook entries/d' \
   "${OUT_TEXT_RAW}" > "${OUT_TEXT}"; then
   cp "${OUT_TEXT_RAW}" "${OUT_TEXT}"
 fi
@@ -566,7 +581,6 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
 HTML
 fi
 
-cat "${OUT_TEXT}"
 exit "${status}"
 `, kindSkill, specB64, promptB64), nil
 }

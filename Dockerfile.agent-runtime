@@ -21,7 +21,9 @@ RUN npm install -g --omit=dev --no-audit --no-fund \
     playwright-cli \
     playwright
 
+COPY agents/osmable-patches /opt/nereid/osmable-patches
 RUN git clone --depth 1 https://github.com/yuiseki/osmable /tmp/osmable \
+  && git -C /tmp/osmable apply /opt/nereid/osmable-patches/0001-overpass-retry-and-geojson-feature-collection.patch \
   && cd /tmp/osmable \
   && npm ci \
   && npm run build \
