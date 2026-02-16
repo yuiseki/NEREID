@@ -180,6 +180,13 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 		"gdal.rastertile.v1",
 		"laz.3dtiles.v1",
 	}
+	kindSkills := map[string]string{
+		"overpassql.map.v1":  "overpassql-map-v1",
+		"maplibre.style.v1":  "maplibre-style-v1",
+		"duckdb.map.v1":      "duckdb-map-v1",
+		"gdal.rastertile.v1": "gdal-rastertile-v1",
+		"laz.3dtiles.v1":     "laz-3dtiles-v1",
+	}
 
 	for _, legacyKind := range kinds {
 		t.Run(legacyKind, func(t *testing.T) {
@@ -226,45 +233,42 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 			}
 
 			embedded := decodeEmbeddedAgentScript(t, wrapper)
+			kindSkill := kindSkills[legacyKind]
 			for _, needle := range []string{
 				"legacy-work-spec.json",
 				"GEMINI_MD_FILE",
 				"@google/gemini-cli",
 				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}\"",
 				"--model \"${GEMINI_CLI_MODEL}\"",
+				"WARNING: The following project-level hooks have been detected in this workspace:",
 				"legacy-kind-prompt.txt",
-				"OSMABLE_SKILL_DIR=\"${GEMINI_DIR}/skills/osmable-v1\"",
-				"OSMABLE_SKILL_B64=\"",
-				"OSMABLE_WRAPPER_FILE=\"${BIN_DIR}/osmable\"",
-				"create_npx_wrapper \"${OSMABLE_WRAPPER_FILE}\" \"github:yuiseki/osmable\"",
-				"HTTP_SERVER_WRAPPER_FILE=\"${BIN_DIR}/http-server\"",
-				"PLAYWRIGHT_CLI_WRAPPER_FILE=\"${BIN_DIR}/playwright-cli\"",
-				"create_npx_wrapper \"${HTTP_SERVER_WRAPPER_FILE}\" \"http-server\"",
-				"create_npx_wrapper \"${PLAYWRIGHT_CLI_WRAPPER_FILE}\" \"playwright-cli\"",
-				"export PATH=\"${BIN_DIR}:${PATH}\"",
-				"GEMINI_SETTINGS_FILE=\"${GEMINI_DIR}/settings.json\"",
-				"INDEX_VALIDATE_HOOK_FILE=\"${GEMINI_HOOKS_DIR}/validate-index.sh\"",
+				"KIND_SKILL_FILE=\"${OUT_DIR}/.gemini/skills/" + kindSkill + "/SKILL.md\"",
 				"TEMPLATE_ROOT=\"${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}\"",
+				"Gemini workspace template missing: ${TEMPLATE_ROOT}/.gemini",
+				"Gemini workspace template missing: ${TEMPLATE_ROOT}/GEMINI.md",
 				"cp -R \"${TEMPLATE_ROOT}/.gemini/.\" \"${OUT_DIR}/.gemini/\"",
-				"\"name\": \"validate-index-html\"",
-				"\"command\": \"$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh\"",
-				"apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git",
-				"./specials/skills/",
-				legacyKindSkillSlug(legacyKind),
-				"DO NOT use web_fetch. Use curl/browser fetch directly.",
-				"Never call Overpass with raw query in ?data=",
-				"Workspace skills are available under ./.gemini/skills/.",
+				"cp \"${TEMPLATE_ROOT}/GEMINI.md\" \"${GEMINI_MD_FILE}\"",
 			} {
 				if !strings.Contains(embedded, needle) {
 					t.Fatalf("embedded script missing %q\nscript:\n%s", needle, embedded)
 				}
 			}
-			osmableSkill := decodeEmbeddedB64Var(t, embedded, "OSMABLE_SKILL_B64")
-			if !strings.Contains(osmableSkill, "osmable doctor") {
-				t.Fatalf("decoded osmable skill missing doctor guidance:\n%s", osmableSkill)
+			prompt := decodeEmbeddedB64Var(t, embedded, "PROMPT_B64")
+			if !strings.Contains(prompt, "Primary skill: "+kindSkill) {
+				t.Fatalf("prompt missing primary skill hint %q\nprompt:\n%s", kindSkill, prompt)
 			}
-			if strings.Contains(embedded, "@./.gemini/skills/") {
-				t.Fatalf("embedded script should not eager-load skill bodies via @ imports:\n%s", embedded)
+			if !strings.Contains(prompt, "especially "+kindSkill+".") {
+				t.Fatalf("prompt missing skill activation hint %q\nprompt:\n%s", kindSkill, prompt)
+			}
+			for _, needle := range []string{
+				"OSMABLE_SKILL_B64=",
+				"create_npx_wrapper",
+				"INDEX_VALIDATE_HOOK_FILE=",
+				"apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git",
+			} {
+				if strings.Contains(embedded, needle) {
+					t.Fatalf("embedded script should not contain %q\nscript:\n%s", needle, embedded)
+				}
 			}
 		})
 	}

@@ -166,127 +166,39 @@ func TestComposeAgentPromptWithoutContextReturnsPromptOnly(t *testing.T) {
 	}
 }
 
-func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
+func TestGeminiAgentScriptUsesWorkspaceTemplate(t *testing.T) {
 	script := geminiAgentScript()
-	if !strings.Contains(script, `GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"`) {
-		t.Fatalf("geminiAgentScript() missing GEMINI.md generation: %q", script)
+	for _, needle := range []string{
+		`SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"`,
+		`GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"`,
+		`TEMPLATE_ROOT="${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}"`,
+		`Gemini workspace template missing: ${TEMPLATE_ROOT}/.gemini`,
+		`Gemini workspace template missing: ${TEMPLATE_ROOT}/GEMINI.md`,
+		`cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/"`,
+		`cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}"`,
+		`chmod +x "${OUT_DIR}/.gemini/hooks/"*.sh 2>/dev/null || true`,
+		`GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}"`,
+		`--model "${GEMINI_CLI_MODEL}"`,
+		`YOLO mode is enabled\. All tool calls will be automatically approved\.`,
+		`WARNING: The following project-level hooks have been detected in this workspace:`,
+		`Hook registry initialized with [0-9][0-9]* hook entries`,
+	} {
+		if !strings.Contains(script, needle) {
+			t.Fatalf("geminiAgentScript() missing %q:\n%s", needle, script)
+		}
 	}
-	if !strings.Contains(script, `GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"`) {
-		t.Fatalf("geminiAgentScript() missing skill generation: %q", script)
-	}
-	if !strings.Contains(script, `CREATE_SKILLS_SKILL_FILE="${GEMINI_DIR}/skills/create-skills/SKILL.md"`) {
-		t.Fatalf("geminiAgentScript() missing create-skills skill generation: %q", script)
-	}
-	if !strings.Contains(script, `SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"`) {
-		t.Fatalf("geminiAgentScript() missing specials/skills output directory: %q", script)
-	}
-	if !strings.Contains(script, `KIND_OSMABLE_SKILL_FILE="${GEMINI_DIR}/skills/osmable-v1/SKILL.md"`) {
-		t.Fatalf("geminiAgentScript() missing osmable skill generation: %q", script)
-	}
-	if !strings.Contains(script, `GEMINI_SETTINGS_FILE="${GEMINI_DIR}/settings.json"`) {
-		t.Fatalf("geminiAgentScript() missing hooks settings generation path: %q", script)
-	}
-	if !strings.Contains(script, `INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"`) {
-		t.Fatalf("geminiAgentScript() missing index validation hook path: %q", script)
-	}
-	if !strings.Contains(script, `OSMABLE_WRAPPER_FILE="${BIN_DIR}/osmable"`) {
-		t.Fatalf("geminiAgentScript() missing osmable wrapper path: %q", script)
-	}
-	if !strings.Contains(script, `HTTP_SERVER_WRAPPER_FILE="${BIN_DIR}/http-server"`) {
-		t.Fatalf("geminiAgentScript() missing http-server wrapper path: %q", script)
-	}
-	if !strings.Contains(script, `PLAYWRIGHT_CLI_WRAPPER_FILE="${BIN_DIR}/playwright-cli"`) {
-		t.Fatalf("geminiAgentScript() missing playwright-cli wrapper path: %q", script)
-	}
-	if !strings.Contains(script, `exec npx -y --loglevel=error --no-update-notifier --no-fund --no-audit ${pkg} "\$@"`) {
-		t.Fatalf("geminiAgentScript() missing generic npx wrapper body: %q", script)
-	}
-	if !strings.Contains(script, `create_npx_wrapper "${OSMABLE_WRAPPER_FILE}" "github:yuiseki/osmable"`) {
-		t.Fatalf("geminiAgentScript() missing osmable wrapper registration: %q", script)
-	}
-	if !strings.Contains(script, `create_npx_wrapper "${HTTP_SERVER_WRAPPER_FILE}" "http-server"`) {
-		t.Fatalf("geminiAgentScript() missing http-server wrapper registration: %q", script)
-	}
-	if !strings.Contains(script, `create_npx_wrapper "${PLAYWRIGHT_CLI_WRAPPER_FILE}" "playwright-cli"`) {
-		t.Fatalf("geminiAgentScript() missing playwright-cli wrapper registration: %q", script)
-	}
-	if !strings.Contains(script, "Playwright browser binaries may be missing") {
-		t.Fatalf("geminiAgentScript() missing Playwright runtime note in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, "Commands available in PATH via npx wrappers: osmable, http-server, playwright-cli.") {
-		t.Fatalf("geminiAgentScript() missing wrapper runtime facts in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, `TEMPLATE_ROOT="${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}"`) {
-		t.Fatalf("geminiAgentScript() missing template root wiring: %q", script)
-	}
-	if !strings.Contains(script, `cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/"`) {
-		t.Fatalf("geminiAgentScript() missing template .gemini copy: %q", script)
-	}
-	if !strings.Contains(script, `cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}"`) {
-		t.Fatalf("geminiAgentScript() missing template GEMINI.md copy: %q", script)
-	}
-	if !strings.Contains(script, `export PATH="${BIN_DIR}:${PATH}"`) {
-		t.Fatalf("geminiAgentScript() missing PATH update for wrappers: %q", script)
-	}
-	if !strings.Contains(script, `"AfterAgent"`) {
-		t.Fatalf("geminiAgentScript() missing AfterAgent hook configuration: %q", script)
-	}
-	if !strings.Contains(script, `"command": "$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh"`) {
-		t.Fatalf("geminiAgentScript() missing hook command path: %q", script)
-	}
-	if !strings.Contains(script, `{"decision":"deny","reason":"%s"}`) {
-		t.Fatalf("geminiAgentScript() missing hook deny output contract: %q", script)
-	}
-	if !strings.Contains(script, "osmable doctor") {
-		t.Fatalf("geminiAgentScript() missing osmable guidance in skill body: %q", script)
-	}
-	if !strings.Contains(script, "Workspace skills are available under ./.gemini/skills/.") {
-		t.Fatalf("geminiAgentScript() missing skill discovery policy in GEMINI.md: %q", script)
-	}
-	if strings.Contains(script, "@./.gemini/skills/") {
-		t.Fatalf("geminiAgentScript() should not eager-load skill bodies via @ imports: %q", script)
-	}
-	if strings.Contains(script, "/.gemini/skills/legacy-") {
-		t.Fatalf("geminiAgentScript() should not use legacy- prefixed skill paths: %q", script)
-	}
-	if !strings.Contains(script, "Absolute security rule (highest priority)") {
-		t.Fatalf("geminiAgentScript() missing highest-priority security rule in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, "MUST NOT read, reference, request, print, or persist any environment variable value") {
-		t.Fatalf("geminiAgentScript() missing environment-variable prohibition in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, "MUST NOT expose secrets (for example GEMINI_API_KEY)") {
-		t.Fatalf("geminiAgentScript() missing secret exfiltration prohibition in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, "Gemini web_fetch is allowed for normal web pages.") {
-		t.Fatalf("geminiAgentScript() missing web_fetch allowance in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, "DO NOT use web_fetch. Use curl/browser fetch directly.") {
-		t.Fatalf("geminiAgentScript() missing structured API web_fetch prohibition in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, "Never call Overpass with raw query in ?data=") {
-		t.Fatalf("geminiAgentScript() missing raw Overpass query prohibition in GEMINI.md: %q", script)
-	}
-	if !strings.Contains(script, "curl -sS -G --data-urlencode \"data=<overpass-ql>\" https://overpass.yuiseki.net/api/interpreter") {
-		t.Fatalf("geminiAgentScript() missing URL-encoded Overpass curl guidance in skill: %q", script)
-	}
-	if !strings.Contains(script, "https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>") {
-		t.Fatalf("geminiAgentScript() missing strict Nominatim URL template: %q", script)
-	}
-	if !strings.Contains(script, "apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git") {
-		t.Fatalf("geminiAgentScript() missing bootstrap for pgrep/curl/wget/git tools: %q", script)
-	}
-	if !strings.Contains(script, `GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}"`) {
-		t.Fatalf("geminiAgentScript() missing gemini-2.5-flash model default: %q", script)
-	}
-	if !strings.Contains(script, `--model "${GEMINI_CLI_MODEL}"`) {
-		t.Fatalf("geminiAgentScript() missing explicit --model flag: %q", script)
-	}
-	if !strings.Contains(script, "YOLO mode is enabled\\. All tool calls will be automatically approved\\.") {
-		t.Fatalf("geminiAgentScript() missing YOLO banner cleanup filter: %q", script)
-	}
-	if !strings.Contains(script, "Hook registry initialized with [0-9][0-9]* hook entries") {
-		t.Fatalf("geminiAgentScript() missing hook registry cleanup filter: %q", script)
+
+	for _, needle := range []string{
+		`GEMINI_SKILL_FILE=`,
+		`CREATE_SKILLS_SKILL_FILE=`,
+		`KIND_OSMABLE_SKILL_FILE=`,
+		`INDEX_VALIDATE_HOOK_FILE=`,
+		`create_npx_wrapper`,
+		`apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git`,
+	} {
+		if strings.Contains(script, needle) {
+			t.Fatalf("geminiAgentScript() must not embed runtime assets %q:\n%s", needle, script)
+		}
 	}
 }
 

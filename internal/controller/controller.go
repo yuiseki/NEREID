@@ -358,8 +358,7 @@ func legacyKindBridgePrompt(kind string, spec map[string]interface{}) string {
 }
 
 func buildLegacyKindBridgeScript(kind string, spec map[string]interface{}) (string, error) {
-	skillSlug := legacyKindSkillSlug(kind)
-	skillDoc, err := legacyKindSkillDoc(kind)
+	kindSkill, err := legacyKindSkillName(kind)
 	if err != nil {
 		return "", err
 	}
@@ -369,12 +368,8 @@ func buildLegacyKindBridgeScript(kind string, spec map[string]interface{}) (stri
 		return "", fmt.Errorf("marshal legacy spec for %s: %w", kind, err)
 	}
 
-	commonSkillB64 := base64.StdEncoding.EncodeToString([]byte(legacyCommonSkillDoc()))
-	createSkillsB64 := base64.StdEncoding.EncodeToString([]byte(legacyCreateSkillsSkillDoc()))
-	osmableSkillB64 := base64.StdEncoding.EncodeToString([]byte(legacyOsmableSkillDoc()))
-	kindSkillB64 := base64.StdEncoding.EncodeToString([]byte(skillDoc))
 	specB64 := base64.StdEncoding.EncodeToString(specJSON)
-	promptB64 := base64.StdEncoding.EncodeToString([]byte(legacyKindBridgePromptText(kind)))
+	promptB64 := base64.StdEncoding.EncodeToString([]byte(legacyKindBridgePromptText(kind, kindSkill)))
 
 	return fmt.Sprintf(`set -eu
 OUT_DIR="${NEREID_ARTIFACT_DIR:-/artifacts/${NEREID_WORK_NAME:-work}}"
@@ -385,22 +380,11 @@ OUT_TEXT="${OUT_DIR}/gemini-output.txt"
 OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
 PROMPT_FILE="${OUT_DIR}/legacy-kind-prompt.txt"
 SPEC_FILE="${OUT_DIR}/legacy-work-spec.json"
-GEMINI_DIR="${OUT_DIR}/.gemini"
-GEMINI_SETTINGS_FILE="${GEMINI_DIR}/settings.json"
-GEMINI_HOOKS_DIR="${GEMINI_DIR}/hooks"
-INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"
-BIN_DIR="${OUT_DIR}/.bin"
-OSMABLE_WRAPPER_FILE="${BIN_DIR}/osmable"
-HTTP_SERVER_WRAPPER_FILE="${BIN_DIR}/http-server"
-PLAYWRIGHT_CLI_WRAPPER_FILE="${BIN_DIR}/playwright-cli"
-COMMON_SKILL_DIR="${GEMINI_DIR}/skills/nereid-artifact-authoring"
-CREATE_SKILLS_DIR="${GEMINI_DIR}/skills/create-skills"
-OSMABLE_SKILL_DIR="${GEMINI_DIR}/skills/osmable-v1"
-KIND_SKILL_DIR="${GEMINI_DIR}/skills/%s"
+KIND_SKILL_FILE="${OUT_DIR}/.gemini/skills/%s/SKILL.md"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 
 export HOME="${OUT_DIR}/.home"
-mkdir -p "${HOME}" "${GEMINI_HOOKS_DIR}" "${BIN_DIR}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${OSMABLE_SKILL_DIR}" "${KIND_SKILL_DIR}"
+mkdir -p "${HOME}"
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
@@ -433,168 +417,33 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   exit 2
 fi
 
-MISSING_TOOLS=""
-for cmd in pgrep curl wget; do
-  if ! command -v "${cmd}" >/dev/null 2>&1; then
-    MISSING_TOOLS="${MISSING_TOOLS} ${cmd}"
-  fi
-done
-if [ -n "${MISSING_TOOLS}" ] && command -v apt-get >/dev/null 2>&1; then
-  export DEBIAN_FRONTEND=noninteractive
-  apt-get update -qq >/dev/null 2>&1 || true
-  apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git >/dev/null 2>&1 || true
-fi
-
-COMMON_SKILL_B64=%q
-printf '%%s' "${COMMON_SKILL_B64}" | base64 -d > "${COMMON_SKILL_DIR}/SKILL.md"
-
-CREATE_SKILLS_B64=%q
-printf '%%s' "${CREATE_SKILLS_B64}" | base64 -d > "${CREATE_SKILLS_DIR}/SKILL.md"
-
-OSMABLE_SKILL_B64=%q
-printf '%%s' "${OSMABLE_SKILL_B64}" | base64 -d > "${OSMABLE_SKILL_DIR}/SKILL.md"
-
-KIND_SKILL_B64=%q
-printf '%%s' "${KIND_SKILL_B64}" | base64 -d > "${KIND_SKILL_DIR}/SKILL.md"
-
 SPEC_B64=%q
 printf '%%s' "${SPEC_B64}" | base64 -d > "${SPEC_FILE}"
 
 PROMPT_B64=%q
 printf '%%s' "${PROMPT_B64}" | base64 -d > "${PROMPT_FILE}"
 
-create_npx_wrapper() {
-  local target="$1"
-  local pkg="$2"
-  cat > "${target}" <<WRAP
-#!/usr/bin/env bash
-set -eu
-exec npx -y --loglevel=error --no-update-notifier --no-fund --no-audit ${pkg} "\$@"
-WRAP
-  chmod +x "${target}"
-}
-
-create_npx_wrapper "${OSMABLE_WRAPPER_FILE}" "github:yuiseki/osmable"
-create_npx_wrapper "${HTTP_SERVER_WRAPPER_FILE}" "http-server"
-create_npx_wrapper "${PLAYWRIGHT_CLI_WRAPPER_FILE}" "playwright-cli"
-export PATH="${BIN_DIR}:${PATH}"
-
-cat > "${INDEX_VALIDATE_HOOK_FILE}" <<'HOOK'
-#!/usr/bin/env bash
-set -eu
-
-HOOK_INPUT="$(cat || true)"
-IS_RETRY="false"
-if printf '%%s' "${HOOK_INPUT}" | tr -d '\n' | grep -Eq '"stop_hook_active"[[:space:]]*:[[:space:]]*true'; then
-  IS_RETRY="true"
-fi
-
-PROJECT_DIR="${GEMINI_PROJECT_DIR:-${GEMINI_CWD:-$(pwd)}}"
-INDEX_FILE="${PROJECT_DIR}/index.html"
-RUNTIME_PATTERN="cannot read properties of undefined \\(reading 'lon'\\)|cannot read properties of undefined \\(reading 'lat'\\)|typeerror: cannot read properties of undefined"
-
-emit_allow() {
-  printf '{"decision":"allow"}\n'
-}
-
-emit_deny() {
-  local msg="$1"
-  msg=$(printf '%%s' "${msg}" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '{"decision":"deny","reason":"%%s"}\n' "${msg}"
-}
-
-emit_stop() {
-  local msg="$1"
-  msg=$(printf '%%s' "${msg}" | sed 's/\\/\\\\/g; s/"/\\"/g')
-  printf '{"continue":false,"stopReason":"%%s"}\n' "${msg}"
-}
-
-fail_validation() {
-  local msg="$1"
-  if [ "${IS_RETRY}" = "true" ]; then
-    emit_stop "index.html validation still failing after retry: ${msg}"
-  else
-    emit_deny "index.html validation failed: ${msg}"
-  fi
-  exit 0
-}
-
-if [ ! -s "${INDEX_FILE}" ]; then
-  fail_validation "index.html not found or empty. Create ./index.html with rendered result."
-fi
-
-if ! grep -Eqi '<!doctype html|<html[[:space:]>]|<body[[:space:]>]|<main[[:space:]>]|<div[[:space:]>]|<section[[:space:]>]|<canvas[[:space:]>]|<svg[[:space:]>]|<script[[:space:]>]|<h1[[:space:]>]|<p[[:space:]>]' "${INDEX_FILE}"; then
-  fail_validation "index.html does not look like renderable HTML."
-fi
-
-for path in \
-  "${PROJECT_DIR}/index.html" \
-  "${PROJECT_DIR}/gemini-output.txt" \
-  "${PROJECT_DIR}/agent.log" \
-  "${PROJECT_DIR}/dialogue.txt" \
-  "${PROJECT_DIR}/logs/agent.log" \
-  "${PROJECT_DIR}/logs/dialogue.txt"
-do
-  if [ -f "${path}" ] && grep -Eqi "${RUNTIME_PATTERN}" "${path}"; then
-    fail_validation "runtime error signature detected in ${path##*/}."
-  fi
-done
-
-emit_allow
-HOOK
-chmod +x "${INDEX_VALIDATE_HOOK_FILE}"
-
-cat > "${GEMINI_SETTINGS_FILE}" <<'SETTINGS'
-{
-  "hooks": {
-    "AfterAgent": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "name": "validate-index-html",
-            "type": "command",
-            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh",
-            "timeout": 5000
-          }
-        ]
-      }
-    ]
-  }
-}
-SETTINGS
-
-cat > "${GEMINI_MD_FILE}" <<'GEMINI'
-# NEREID Legacy Kind Bridge
-
-## Absolute security rule (highest priority)
-- You MUST NOT read, reference, request, print, or persist any environment variable value.
-- You MUST NOT expose secrets (for example GEMINI_API_KEY) in any output, including index.html, logs, dialogue, or generated files.
-- Gemini web_fetch is allowed for normal web pages.
-- For structured JSON APIs (Overpass/Nominatim), DO NOT use web_fetch. Use curl/browser fetch directly.
-- Never call Overpass with raw query in ?data=. URL-encode query or use curl --data-urlencode.
-
-## Skill policy
-- Workspace skills are available under ./.gemini/skills/.
-- Rely on Gemini skill discovery and activate_skill for progressive disclosure.
-- Do not pre-load all skill bodies at startup unless strictly required.
-
-## Runtime facts
-- Legacy work specification is available at ./legacy-work-spec.json
-- Current instruction is available at ./legacy-kind-prompt.txt
-- Persist output artifacts in the current directory.
-- Persist extracted session skills under ./specials/skills/.
-- Commands available in PATH via npx wrappers: osmable, http-server, playwright-cli.
-- Playwright browser binaries may be missing; install only when browser automation is required.
-GEMINI
-
 TEMPLATE_ROOT="${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}"
-if [ -d "${TEMPLATE_ROOT}/.gemini" ]; then
-  mkdir -p "${OUT_DIR}/.gemini"
-  cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/" >/dev/null 2>&1 || true
+if [ ! -d "${TEMPLATE_ROOT}/.gemini" ]; then
+  printf '%%s\n' "Gemini workspace template missing: ${TEMPLATE_ROOT}/.gemini" > "${OUT_TEXT}"
+  cat "${OUT_TEXT}"
+  exit 2
 fi
-if [ -f "${TEMPLATE_ROOT}/GEMINI.md" ]; then
-  cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}" >/dev/null 2>&1 || true
+if [ ! -f "${TEMPLATE_ROOT}/GEMINI.md" ]; then
+  printf '%%s\n' "Gemini workspace template missing: ${TEMPLATE_ROOT}/GEMINI.md" > "${OUT_TEXT}"
+  cat "${OUT_TEXT}"
+  exit 2
+fi
+
+mkdir -p "${OUT_DIR}/.gemini"
+cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/"
+cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}"
+chmod +x "${OUT_DIR}/.gemini/hooks/"*.sh 2>/dev/null || true
+
+if [ ! -f "${KIND_SKILL_FILE}" ]; then
+  printf '%%s\n' "Legacy kind skill missing in template: ${KIND_SKILL_FILE}" > "${OUT_TEXT}"
+  cat "${OUT_TEXT}"
+  exit 2
 fi
 
 cd "${OUT_DIR}"
@@ -613,6 +462,7 @@ if ! sed \
   -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
   -e '/^npm[[:space:]]\+notice/d' \
   -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
+  -e '/^WARNING: The following project-level hooks have been detected in this workspace:/,/remove them/d' \
   -e '/^Hook registry initialized with [0-9][0-9]* hook entries$/d' \
   "${OUT_TEXT_RAW}" > "${OUT_TEXT}"; then
   cp "${OUT_TEXT_RAW}" "${OUT_TEXT}"
@@ -654,263 +504,40 @@ fi
 
 cat "${OUT_TEXT}"
 exit "${status}"
-`, skillSlug, commonSkillB64, createSkillsB64, osmableSkillB64, kindSkillB64, specB64, promptB64), nil
+`, kindSkill, specB64, promptB64), nil
 }
 
-func legacyKindSkillSlug(kind string) string {
-	slug := strings.NewReplacer(".", "-", "_", "-", "/", "-").Replace(strings.ToLower(strings.TrimSpace(kind)))
-	slug = strings.Trim(slug, "-")
-	if slug == "" {
-		return "kind"
-	}
-	return slug
-}
-
-func legacyCommonSkillDoc() string {
-	return `---
-name: nereid-artifact-authoring
-description: Create static-hostable HTML artifacts in NEREID workspace.
----
-# NEREID Artifact Authoring
-
-## Required behavior
-- You MUST create or update ./index.html in the current directory.
-- First action: write a minimal ./index.html (for example, an <h1>Hello, world</h1> page).
-- After bootstrap, replace or extend ./index.html to satisfy the current instruction.
-- Use shell commands to write files; do not finish with explanation-only output.
-- Finish only after files are persisted to disk.
-
-## Security
-- NEVER read, request, print, or persist environment variable values.
-- NEVER output secrets such as API keys into logs, text responses, HTML, JavaScript, or any generated file.
-- Gemini web_fetch tool is allowed for normal HTML pages.
-- For structured JSON APIs (for example Overpass/Nominatim), DO NOT use Gemini web_fetch. Use shell curl or browser-side fetch directly.
-- Never pass raw Overpass QL in a URL query string such as .../api/interpreter?data=[out:json]....
-- For Overpass requests, always URL-encode data (for example encodeURIComponent(query)) or use curl -G --data-urlencode.
-- If a structured API call fails, retry with curl/browser fetch; do not retry with web_fetch.
-- For OSM geocoding/AOI/POI/routing, prefer osmable ... for deterministic execution.
-
-## Mapping defaults
-- For map requests, produce an interactive HTML map (MapLibre, Leaflet, or Cesium).
-- For MapLibre base maps, use one of:
-  - https://tile.yuiseki.net/styles/osm-bright/style.json
-  - https://tile.yuiseki.net/styles/osm-fiord/style.json
-- If Overpass API is used, call one of:
-  - https://overpass.yuiseki.net/api/interpreter?data=<url-encoded-overpass-ql>
-  - curl -sS -G --data-urlencode "data=<overpass-ql>" https://overpass.yuiseki.net/api/interpreter
-- If Nominatim API is used, use:
-  - https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>
-`
-}
-
-func legacyCreateSkillsSkillDoc() string {
-	return `---
-name: create-skills
-description: Extract reusable lessons from this session and persist them as local skill documents under specials/skills.
----
-# Create Session Skills
-
-## Goal
-- Persist reusable operational knowledge from the current task as skill documents.
-
-## Required behavior
-- Before finishing, write at least one skill directory under ./specials/skills/.
-- For each created skill, create ./specials/skills/<skill-name>/SKILL.md.
-- The frontmatter name must exactly match <skill-name>.
-- Keep each SKILL.md focused on reusable decision rules, not task-specific narration.
-- Use this structure in each SKILL.md:
-  1. Trigger patterns
-  2. Decision rule
-  3. Execution steps
-  4. Failure signals and fallback
-- Use lowercase letters, digits, and hyphens for <skill-name>.
-- Add scripts/, references/, and assets/ only when needed.
-- Each created skill must be unique compared with existing skills in ./.gemini/skills and ./specials/skills.
-- Each created skill must be highly reproducible: include explicit prerequisites, stable inputs, deterministic steps, and expected outputs.
-- If an equivalent skill already exists, update that local session skill instead of creating a duplicate.
-- Never include secrets, environment variables, or user-private sensitive content.
-
-## Scope
-- Save only local session skills in ./specials/skills/.
-- Do not modify global NEREID runtime code or external skill repositories.
-`
-}
-
-func legacyOsmableSkillDoc() string {
-	return `---
-name: osmable-v1
-description: Use osmable CLI for deterministic OSM geocoding, AOI, POI, and routing workflows.
----
-# osmable Workflow
-
-## When to use
-- Instruction involves OSM data retrieval or geospatial operations (Nominatim/Overpass/Valhalla).
-- Deterministic command output is preferred over fragile ad-hoc API calls.
-
-## Core rules
-1. Prefer osmable ... for geocode/aoi/poi/route tasks.
-2. Use default text output for concise logs.
-3. Use --format json or --format geojson when machine-readable output is required.
-4. Run osmable doctor before critical flows.
-
-## Common commands
-- Geocode: osmable geocode "東京都台東区" --format json
-- AOI: osmable aoi resolve "東京都台東区" --format geojson > aoi.geojson
-- POI count: osmable poi count --tag leisure=park --within "東京都台東区" --format json
-- POI fetch: osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > parks.geojson
-- Route: osmable route --from "上野駅" --to "浅草寺" --mode pedestrian --format json > route.json
-
-## Failure and fallback
-- If osmable fails, capture stderr and exit code in artifacts.
-- Fall back to direct curl/browser fetch only when osmable cannot satisfy the task.
-`
-}
-
-func legacyKindSkillDoc(kind string) (string, error) {
+func legacyKindSkillName(kind string) (string, error) {
 	switch kind {
 	case "overpassql.map.v1":
-		return `---
-name: overpassql-map-v1
-description: Decide when to use Overpass QL and how to design robust map data queries.
----
-# Overpass QL Strategy
-
-## When to use
-- User asks for specific real-world objects from OpenStreetMap.
-- Instruction requires tag filtering, administrative area filtering, or bbox search.
-
-## Core knowledge
-- Overpass QL works with node / way / relation.
-- Query design strongly affects response size and runtime.
-- Administrative areas are often resolved via area references.
-
-## Recommended workflow
-1. Read target area intent from instruction and/or spec.
-2. Build explicit tag filters with bounded scope.
-3. Prefer osmable poi count/fetch for deterministic OSM retrieval.
-4. If manual Overpass execution is required, use browser fetch or curl (not web_fetch).
-5. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
-6. Persist raw response and render map-friendly output.
-
-## Output expectations
-- Keep index.html usable.
-- Keep raw response inspectable.
-`, nil
+		return "overpassql-map-v1", nil
 	case "maplibre.style.v1":
-		return `---
-name: maplibre-style-v1
-description: Decide when to author MapLibre Style Spec and how to structure style layers.
----
-# MapLibre Style Authoring
-
-## When to use
-- User asks to change map appearance (colors, labels, emphasis, visibility).
-- Task is cartographic styling rather than heavy data extraction.
-
-## Core knowledge
-- Style Spec uses sources/layers/glyphs/sprites.
-- Layer order determines visual priority.
-- Filters and paint/layout should be explicit.
-
-## Recommended workflow
-1. Choose base style source.
-2. Apply requested style changes with minimal, clear layers.
-3. Validate structure and render preview in index.html.
-
-## Output expectations
-- If style is inline, persist style.json.
-- Keep style/output easy to inspect.
-`, nil
+		return "maplibre-style-v1", nil
 	case "duckdb.map.v1":
-		return `---
-name: duckdb-map-v1
-description: Decide when DuckDB is suitable and how to prepare query-to-map workflows.
----
-# DuckDB Map Workflow
-
-## When to use
-- Instruction implies tabular/spatial analytics before visualization.
-- Query logic is central to the requested result.
-
-## Core knowledge
-- DuckDB is optimized for analytical SQL workloads.
-- Query outputs often need conversion to map-ready geometry/coordinates.
-
-## Recommended workflow
-1. Persist input references and SQL for reproducibility.
-2. Execute query when runtime supports DuckDB.
-3. Convert output into map-usable structure.
-4. Render result/status in index.html.
-
-## Output expectations
-- Keep inputs/query inspectable.
-- Provide fallback status if execution is unavailable.
-`, nil
+		return "duckdb-map-v1", nil
 	case "gdal.rastertile.v1":
-		return `---
-name: gdal-rastertile-v1
-description: Decide when raster tiling is needed and how to structure GDAL-based pipelines.
----
-# GDAL Raster Pipeline
-
-## When to use
-- Input is raster imagery and output should be web-tilable map layers.
-- Reprojection/nodata/zoom tuning is required.
-
-## Core knowledge
-- Typical flow: inspect -> transform -> reproject -> tile.
-- Intermediate artifacts are useful for debugging.
-
-## Recommended workflow
-1. Capture source metadata and processing params.
-2. Apply raster transforms.
-3. Generate tiles and preview entrypoint.
-
-## Output expectations
-- Keep index.html usable.
-- Provide clear fallback details when toolchain is unavailable.
-`, nil
+		return "gdal-rastertile-v1", nil
 	case "laz.3dtiles.v1":
-		return `---
-name: laz-3dtiles-v1
-description: Decide when LAZ to 3DTiles flow is needed and how to structure 3D pointcloud outputs.
----
-# LAZ to 3DTiles Pipeline
-
-## When to use
-- Instruction requests interactive 3D pointcloud visualization from LAZ/LAS data.
-- CRS handling and tileset conversion are required.
-
-## Core knowledge
-- CRS validation/reprojection is often required before conversion.
-- 3DTiles output should include viewer entrypoint and metadata.
-
-## Recommended workflow
-1. Validate source/CRS assumptions.
-2. Execute conversion pipeline when toolchain is available.
-3. Render 3D preview entrypoint and expose generated assets.
-
-## Output expectations
-- Keep index.html usable.
-- Provide clear fallback details when toolchain is unavailable.
-`, nil
+		return "laz-3dtiles-v1", nil
 	default:
 		return "", fmt.Errorf("unsupported legacy kind for bridge: %q", kind)
 	}
 }
 
-func legacyKindBridgePromptText(kind string) string {
+func legacyKindBridgePromptText(kind, skillName string) string {
 	return fmt.Sprintf(`Execute a legacy NEREID work specification bridge.
 
 Target kind: %s
+Primary skill: %s
 
 Steps:
-1. Read ./legacy-work-spec.json and follow imported skills from GEMINI.md.
-2. Reproduce the legacy kind behavior in static artifacts.
-3. Always keep ./index.html renderable from static hosting.
-4. If an external toolchain is unavailable, show concise fallback status in-page and still finish with usable artifacts.
-5. Never read or expose environment variables or secrets.
-`, kind)
+1. Read ./legacy-work-spec.json and ./legacy-kind-prompt.txt.
+2. Activate relevant workspace skills from ./.gemini/skills/, especially %s.
+3. Reproduce the legacy kind behavior in static artifacts.
+4. Always keep ./index.html renderable from static hosting.
+5. If an external toolchain is unavailable, show concise fallback status in-page and still finish with usable artifacts.
+6. Never read or expose environment variables or secrets.
+`, kind, skillName, skillName)
 }
 
 func buildAgentScript(workName, userScript, userPrompt string) string {

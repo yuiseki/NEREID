@@ -4,7 +4,7 @@ NAMESPACE ?= nereid
 API_DEPLOYMENT ?= nereid-api
 CONTROLLER_DEPLOYMENT ?= nereid-controller
 AGENT_IMAGE ?= nereid-agent-runtime:local
-PLAYWRIGHT_CHROMIUM ?= 0
+PLAYWRIGHT_CHROMIUM ?= 1
 
 .PHONY: build deploy build-agent-image
 
