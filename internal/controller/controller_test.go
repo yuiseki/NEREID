@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/base64"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -67,276 +68,91 @@ func TestPruneArtifactsRemovesEntriesOlderThanRetention(t *testing.T) {
 	}
 }
 
-func TestBuildJobOverpassGeneratesMapLibreArtifactPage(t *testing.T) {
-	work := &unstructured.Unstructured{Object: map[string]interface{}{
-		"apiVersion": "nereid.yuiseki.net/v1alpha1",
-		"kind":       "Work",
-		"metadata": map[string]interface{}{
-			"name":      "overpass-sample",
-			"namespace": "nereid",
-		},
-		"spec": map[string]interface{}{
-			"kind":  "overpassql.map.v1",
-			"title": "sample",
-			"overpass": map[string]interface{}{
-				"endpoint": "https://overpass-api.de/api/interpreter",
-				"query":    "[out:json];node(1,2,3,4);out;",
-			},
-			"render": map[string]interface{}{
-				"viewport": map[string]interface{}{
-					"center": []interface{}{139.76, 35.68},
-					"zoom":   11.0,
+func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
+	kinds := []string{
+		"overpassql.map.v1",
+		"maplibre.style.v1",
+		"duckdb.map.v1",
+		"gdal.rastertile.v1",
+		"laz.3dtiles.v1",
+	}
+
+	for _, legacyKind := range kinds {
+		t.Run(legacyKind, func(t *testing.T) {
+			work := &unstructured.Unstructured{Object: map[string]interface{}{
+				"metadata": map[string]interface{}{
+					"name":      "legacy-kind-sample",
+					"namespace": "nereid",
 				},
-			},
-		},
-	}}
+				"spec": map[string]interface{}{
+					"kind":  legacyKind,
+					"title": "legacy sample",
+				},
+			}}
 
-	c := &Controller{
-		cfg: Config{
-			JobNamespace:      "nereid-work",
-			LocalQueueName:    "nereid-localq",
-			ArtifactsHostPath: "/var/lib/nereid/artifacts",
-		},
-	}
+			c := &Controller{
+				cfg: Config{
+					JobNamespace:      "nereid-work",
+					LocalQueueName:    "nereid-localq",
+					ArtifactsHostPath: "/var/lib/nereid/artifacts",
+				},
+			}
 
-	job, err := c.buildJob(work, "work-overpass-sample", "overpassql.map.v1")
-	if err != nil {
-		t.Fatalf("buildJob() error = %v", err)
-	}
-	if got := job.Spec.Template.Spec.Containers[0].Image; got != overpassJobImage {
-		t.Fatalf("unexpected image got=%q want=%q", got, overpassJobImage)
-	}
-	script := job.Spec.Template.Spec.Containers[0].Args[0]
-	for _, needle := range []string{
-		"maplibre-gl",
-		"osmtogeojson",
-		"turf.min.js",
-		"fetch(\"./overpass.json\")",
-		"map.flyTo(",
-		"turf.center(normalized)",
-		"node-pins",
-		"node-halo",
-		"way-emojis",
-		"relation-emojis",
-		"buildEmojiImage(",
-		"classifyConvenienceIcon(",
-		"cvs-711",
-		"cvs-familymart",
-		"cvs-lawson",
-		"__icon_image",
-		"icon-ignore-placement",
-		"circle-stroke-color",
-		"raster-saturation",
-	} {
-		if !strings.Contains(script, needle) {
-			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
-		}
+			job, err := c.buildJob(work, "work-legacy-kind-sample", legacyKind)
+			if err != nil {
+				t.Fatalf("buildJob() error = %v", err)
+			}
+			if got := job.Spec.Template.Spec.Containers[0].Image; got != legacyKindAgentImage {
+				t.Fatalf("unexpected image got=%q want=%q", got, legacyKindAgentImage)
+			}
+
+			wrapper := job.Spec.Template.Spec.Containers[0].Args[0]
+			for _, needle := range []string{
+				"SCRIPT_B64=",
+				"user-input.txt",
+				"dialogue.txt",
+				"agent.log",
+				"https://nereid.yuiseki.net/embed?work=legacy-kind-sample",
+			} {
+				if !strings.Contains(wrapper, needle) {
+					t.Fatalf("wrapper script missing %q\nscript:\n%s", needle, wrapper)
+				}
+			}
+
+			embedded := decodeEmbeddedAgentScript(t, wrapper)
+			for _, needle := range []string{
+				"legacy-work-spec.json",
+				"GEMINI_MD_FILE",
+				"@google/gemini-cli",
+				"legacy-kind-prompt.txt",
+				legacyKindSkillSlug(legacyKind),
+			} {
+				if !strings.Contains(embedded, needle) {
+					t.Fatalf("embedded script missing %q\nscript:\n%s", needle, embedded)
+				}
+			}
+		})
 	}
 }
 
-func TestBuildJobStyleInlineGeneratesPreviewPage(t *testing.T) {
-	work := &unstructured.Unstructured{Object: map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"name":      "style-sample",
-			"namespace": "nereid",
-		},
-		"spec": map[string]interface{}{
-			"kind":  "maplibre.style.v1",
-			"title": "style sample",
-			"style": map[string]interface{}{
-				"sourceStyle": map[string]interface{}{
-					"mode": "inline",
-					"json": `{"version":8,"sources":{"osm":{"type":"raster","tiles":["https://{a,b,c}.tile.openstreetmap.org/{z}/{x}/{y}.png"],"tileSize":256}},"layers":[{"id":"osm","type":"raster","source":"osm"}]}`,
-				},
-			},
-		},
-	}}
-
-	c := &Controller{
-		cfg: Config{
-			JobNamespace:      "nereid-work",
-			LocalQueueName:    "nereid-localq",
-			ArtifactsHostPath: "/var/lib/nereid/artifacts",
-		},
+func decodeEmbeddedAgentScript(t *testing.T, wrapper string) string {
+	t.Helper()
+	const marker = "SCRIPT_B64=\""
+	start := strings.Index(wrapper, marker)
+	if start < 0 {
+		t.Fatalf("SCRIPT_B64 marker not found in wrapper script:\n%s", wrapper)
 	}
-
-	job, err := c.buildJob(work, "work-style-sample", "maplibre.style.v1")
+	start += len(marker)
+	end := strings.Index(wrapper[start:], "\"")
+	if end < 0 {
+		t.Fatalf("SCRIPT_B64 closing quote not found in wrapper script:\n%s", wrapper)
+	}
+	b64 := wrapper[start : start+end]
+	decoded, err := base64.StdEncoding.DecodeString(b64)
 	if err != nil {
-		t.Fatalf("buildJob() error = %v", err)
+		t.Fatalf("decode SCRIPT_B64: %v", err)
 	}
-	if got := job.Spec.Template.Spec.Containers[0].Image; got != styleJobImage {
-		t.Fatalf("unexpected image got=%q want=%q", got, styleJobImage)
-	}
-	script := job.Spec.Template.Spec.Containers[0].Args[0]
-	for _, needle := range []string{
-		"STYLE_MODE=\"inline\"",
-		"base64 -d > \"${OUT_DIR}/style.json\"",
-		"new maplibregl.Map(",
-		"style: \"./style.json\"",
-	} {
-		if !strings.Contains(script, needle) {
-			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
-		}
-	}
-}
-
-func TestBuildJobDuckdbGeneratesScaffoldPage(t *testing.T) {
-	work := &unstructured.Unstructured{Object: map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"name":      "duckdb-sample",
-			"namespace": "nereid",
-		},
-		"spec": map[string]interface{}{
-			"kind":  "duckdb.map.v1",
-			"title": "duckdb sample",
-			"duckdb": map[string]interface{}{
-				"input": map[string]interface{}{
-					"uri": "https://example.com/sample.parquet",
-				},
-				"sql": "select 1;",
-			},
-		},
-	}}
-
-	c := &Controller{
-		cfg: Config{
-			JobNamespace:      "nereid-work",
-			LocalQueueName:    "nereid-localq",
-			ArtifactsHostPath: "/var/lib/nereid/artifacts",
-		},
-	}
-
-	job, err := c.buildJob(work, "work-duckdb-sample", "duckdb.map.v1")
-	if err != nil {
-		t.Fatalf("buildJob() error = %v", err)
-	}
-	if got := job.Spec.Template.Spec.Containers[0].Image; got != duckdbJobImage {
-		t.Fatalf("unexpected image got=%q want=%q", got, duckdbJobImage)
-	}
-	script := job.Spec.Template.Spec.Containers[0].Args[0]
-	for _, needle := range []string{
-		"input_uri.txt",
-		"query.sql",
-		"NEREID duckdb.map.v1 scaffold",
-	} {
-		if !strings.Contains(script, needle) {
-			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
-		}
-	}
-}
-
-func TestBuildJobGDALRasterGeneratesWorkflowScript(t *testing.T) {
-	work := &unstructured.Unstructured{Object: map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"name":      "gdal-sample",
-			"namespace": "nereid",
-		},
-		"spec": map[string]interface{}{
-			"kind":  "gdal.rastertile.v1",
-			"title": "gdal sample",
-			"raster": map[string]interface{}{
-				"input": map[string]interface{}{
-					"uri": "https://example.com/sample.tif",
-				},
-				"nodata": map[string]interface{}{
-					"src": "-9999",
-					"dst": "0",
-				},
-				"reprojection": map[string]interface{}{
-					"targetEPSG": "EPSG:3857",
-					"resampling": "near",
-				},
-				"tiles": map[string]interface{}{
-					"minZoom": int64(2),
-					"maxZoom": int64(9),
-				},
-			},
-		},
-	}}
-
-	c := &Controller{
-		cfg: Config{
-			JobNamespace:      "nereid-work",
-			LocalQueueName:    "nereid-localq",
-			ArtifactsHostPath: "/var/lib/nereid/artifacts",
-		},
-	}
-
-	job, err := c.buildJob(work, "work-gdal-sample", "gdal.rastertile.v1")
-	if err != nil {
-		t.Fatalf("buildJob() error = %v", err)
-	}
-	if got := job.Spec.Template.Spec.Containers[0].Image; got != gdalRasterJobImage {
-		t.Fatalf("unexpected image got=%q want=%q", got, gdalRasterJobImage)
-	}
-	script := job.Spec.Template.Spec.Containers[0].Args[0]
-	for _, needle := range []string{
-		"gdalinfo /tmp/input.tif",
-		"gdal_translate -a_nodata",
-		"gdalwarp -r",
-		"gdal2tiles.py -w none",
-		"GeoTIFF inspect -> NoData -> Reproject -> Raster tiles -> Web map",
-	} {
-		if !strings.Contains(script, needle) {
-			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
-		}
-	}
-}
-
-func TestBuildJobLAZ3DTilesGeneratesWorkflowScript(t *testing.T) {
-	work := &unstructured.Unstructured{Object: map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"name":      "laz-sample",
-			"namespace": "nereid",
-		},
-		"spec": map[string]interface{}{
-			"kind":  "laz.3dtiles.v1",
-			"title": "laz sample",
-			"pointcloud": map[string]interface{}{
-				"input": map[string]interface{}{
-					"uri": "https://example.com/sample.laz",
-				},
-				"crs": map[string]interface{}{
-					"source":          "EPSG:4326",
-					"target":          "EPSG:4978",
-					"inAxisOrdering":  "2,1",
-					"outAxisOrdering": "1,2",
-				},
-				"py3dtiles": map[string]interface{}{
-					"jobs":           4,
-					"pyprojAlwaysXY": true,
-				},
-			},
-		},
-	}}
-
-	c := &Controller{
-		cfg: Config{
-			JobNamespace:      "nereid-work",
-			LocalQueueName:    "nereid-localq",
-			ArtifactsHostPath: "/var/lib/nereid/artifacts",
-		},
-	}
-
-	job, err := c.buildJob(work, "work-laz-sample", "laz.3dtiles.v1")
-	if err != nil {
-		t.Fatalf("buildJob() error = %v", err)
-	}
-	if got := job.Spec.Template.Spec.Containers[0].Image; got != laz3DTilesJobImage {
-		t.Fatalf("unexpected image got=%q want=%q", got, laz3DTilesJobImage)
-	}
-	script := job.Spec.Template.Spec.Containers[0].Args[0]
-	for _, needle := range []string{
-		"pdal info /tmp/input.laz",
-		"filters.reprojection",
-		"pdal pipeline /tmp/pdal-pipeline.json",
-		"py3dtiles convert /tmp/reprojected.laz",
-		"Cesium3DTileset.fromUrl(\"./3dtiles/tileset.json\")",
-	} {
-		if !strings.Contains(script, needle) {
-			t.Fatalf("script missing %q\nscript:\n%s", needle, script)
-		}
-	}
+	return string(decoded)
 }
 
 func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {

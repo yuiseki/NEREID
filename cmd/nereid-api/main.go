@@ -481,8 +481,18 @@ fi
 
 GEMINI_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
 GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"
+KIND_OVERPASS_SKILL_FILE="${OUT_DIR}/.gemini/skills/overpassql-map-v1/SKILL.md"
+KIND_STYLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/maplibre-style-v1/SKILL.md"
+KIND_DUCKDB_SKILL_FILE="${OUT_DIR}/.gemini/skills/duckdb-map-v1/SKILL.md"
+KIND_GDAL_SKILL_FILE="${OUT_DIR}/.gemini/skills/gdal-rastertile-v1/SKILL.md"
+KIND_LAZ_SKILL_FILE="${OUT_DIR}/.gemini/skills/laz-3dtiles-v1/SKILL.md"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
-mkdir -p "${GEMINI_SKILL_DIR}"
+mkdir -p "${GEMINI_SKILL_DIR}" \
+  "$(dirname "${KIND_OVERPASS_SKILL_FILE}")" \
+  "$(dirname "${KIND_STYLE_SKILL_FILE}")" \
+  "$(dirname "${KIND_DUCKDB_SKILL_FILE}")" \
+  "$(dirname "${KIND_GDAL_SKILL_FILE}")" \
+  "$(dirname "${KIND_LAZ_SKILL_FILE}")"
 
 cat > "${GEMINI_SKILL_FILE}" <<'SKILL'
 ---
@@ -526,6 +536,140 @@ Create HTML artifacts that can be opened immediately from static hosting.
 - Keep generated artifacts self-contained and directly viewable from static hosting.
 SKILL
 
+cat > "${KIND_OVERPASS_SKILL_FILE}" <<'SKILL_OVERPASS'
+---
+name: overpassql-map-v1
+description: Decide when to use Overpass QL and how to design robust map data queries.
+---
+# Overpass QL Strategy
+
+## When to use
+- User asks for specific real-world objects from OpenStreetMap (parks, convenience stores, stations, roads, rivers, boundaries).
+- The request needs data filtering by tags, area, or bounding box.
+
+## Core knowledge
+- Overpass QL retrieves OSM elements: node / way / relation.
+- Administrative area search commonly uses area objects and area references.
+- Query shape and output mode strongly affect response size and performance.
+
+## Recommended workflow
+1. Resolve target area from user instruction (city/ward/region).
+2. Build minimal Overpass QL with explicit tag filters.
+3. Use endpoint: https://overpass.yuiseki.net/api/interpreter?data=
+4. Keep timeout and output size reasonable.
+5. Convert response to map-friendly geometry and render in index.html.
+
+## Output expectations
+- Store raw response for debugging.
+- Show clear map visualization and concise summary in-page.
+SKILL_OVERPASS
+
+cat > "${KIND_STYLE_SKILL_FILE}" <<'SKILL_STYLE'
+---
+name: maplibre-style-v1
+description: Decide when to author a MapLibre Style Spec and how to structure layers.
+---
+# MapLibre Style Authoring
+
+## When to use
+- User asks to change visual styling (colors, labels, layer visibility, emphasis).
+- Task is primarily cartographic presentation rather than heavy data processing.
+
+## Core knowledge
+- Style Spec is JSON with version, sources, layers, glyphs/sprites.
+- Layer order controls rendering priority.
+- Filters and paint/layout properties should be explicit and readable.
+
+## Recommended workflow
+1. Choose base style source (tile.yuiseki.net styles when possible).
+2. Add or modify layers to match user intent (labels, fills, lines, symbols).
+3. Validate style structure and field names.
+4. Render preview map in index.html.
+
+## Output expectations
+- If style is inline, persist style.json.
+- Keep style and preview easy to inspect and iterate.
+SKILL_STYLE
+
+cat > "${KIND_DUCKDB_SKILL_FILE}" <<'SKILL_DUCKDB'
+---
+name: duckdb-map-v1
+description: Decide when DuckDB is appropriate and how to prepare query-to-map workflows.
+---
+# DuckDB Map Workflow
+
+## When to use
+- User instruction implies tabular/spatial analytics before visualization.
+- Data source is parquet/csv/geo-like tabular input needing SQL summarization/filtering.
+
+## Core knowledge
+- DuckDB is strong for local analytical SQL.
+- Query outputs often need conversion to GeoJSON or coordinate columns for mapping.
+- Keep queries deterministic and readable.
+
+## Recommended workflow
+1. Persist input URI(s) and SQL for reproducibility.
+2. Execute query when runtime supports DuckDB; otherwise provide structured fallback.
+3. Convert results into map-ready data representation.
+4. Render output and query summary in index.html.
+
+## Output expectations
+- Keep input/query artifacts inspectable.
+- Keep map/status page usable even when execution is partially unavailable.
+SKILL_DUCKDB
+
+cat > "${KIND_GDAL_SKILL_FILE}" <<'SKILL_GDAL'
+---
+name: gdal-rastertile-v1
+description: Decide when raster tiling is needed and how to structure GDAL-based pipelines.
+---
+# GDAL Raster Pipeline
+
+## When to use
+- Input is raster imagery (GeoTIFF etc.) and user needs web tile visualization.
+- Reprojection, nodata handling, or zoom-range control is required.
+
+## Core knowledge
+- Typical steps: inspect -> optional nodata normalization -> reprojection -> tile generation.
+- Output should include both artifacts and a preview map.
+
+## Recommended workflow
+1. Capture source metadata and processing parameters.
+2. Apply necessary raster transforms.
+3. Generate web-consumable tiles.
+4. Provide index.html preview and links to intermediate artifacts.
+
+## Output expectations
+- Reproducible pipeline artifacts.
+- Clear fallback message when toolchain/runtime is unavailable.
+SKILL_GDAL
+
+cat > "${KIND_LAZ_SKILL_FILE}" <<'SKILL_LAZ'
+---
+name: laz-3dtiles-v1
+description: Decide when LAZ to 3DTiles flow is needed and how to structure 3D pointcloud outputs.
+---
+# LAZ to 3DTiles Pipeline
+
+## When to use
+- User requests interactive 3D pointcloud visualization from LAZ/LAS data.
+- CRS normalization and tileset generation are needed for web viewers.
+
+## Core knowledge
+- Pointcloud workflows often require CRS checks/reprojection.
+- 3DTiles output should be accompanied by a browser preview and metadata.
+
+## Recommended workflow
+1. Validate source file and CRS assumptions.
+2. Run conversion pipeline to 3DTiles when toolchain is available.
+3. Produce browser-viewable entrypoint (Cesium or equivalent).
+4. Include links to generated tileset and metadata.
+
+## Output expectations
+- index.html must remain usable.
+- If conversion toolchain is unavailable, provide explicit fallback details in-page.
+SKILL_LAZ
+
 cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 # NEREID Workspace Context
 
@@ -536,6 +680,11 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - You MUST NOT use Gemini web_fetch for HTTP API calls. Use shell curl or browser-side fetch in generated HTML.
 
 @./.gemini/skills/nereid-artifact-authoring/SKILL.md
+@./.gemini/skills/overpassql-map-v1/SKILL.md
+@./.gemini/skills/maplibre-style-v1/SKILL.md
+@./.gemini/skills/duckdb-map-v1/SKILL.md
+@./.gemini/skills/gdal-rastertile-v1/SKILL.md
+@./.gemini/skills/laz-3dtiles-v1/SKILL.md
 
 ## Runtime facts
 - You are operating inside one NEREID artifact workspace.

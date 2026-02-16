@@ -177,6 +177,12 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, "@./.gemini/skills/nereid-artifact-authoring/SKILL.md") {
 		t.Fatalf("geminiAgentScript() missing skill import in GEMINI.md: %q", script)
 	}
+	if !strings.Contains(script, "@./.gemini/skills/overpassql-map-v1/SKILL.md") {
+		t.Fatalf("geminiAgentScript() missing overpass strategy skill import: %q", script)
+	}
+	if strings.Contains(script, "/.gemini/skills/legacy-") {
+		t.Fatalf("geminiAgentScript() should not use legacy- prefixed skill paths: %q", script)
+	}
 	if !strings.Contains(script, "Absolute security rule (highest priority)") {
 		t.Fatalf("geminiAgentScript() missing highest-priority security rule in GEMINI.md: %q", script)
 	}
