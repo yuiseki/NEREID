@@ -382,6 +382,10 @@ func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {
 	for _, needle := range []string{
 		"NEREID_WORK_NAME",
 		"NEREID_ARTIFACT_DIR",
+		"LOGS_DIR=\"${OUT_DIR}/logs\"",
+		"start-time.txt",
+		"instructions.csv",
+		"timestamp_unix,role,text",
 		"command.txt",
 		"user-input.txt",
 		"dialogue.txt",

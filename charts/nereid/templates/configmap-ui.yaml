@@ -695,6 +695,33 @@ data:
             return t;
           }
 
+          function latestUserInputFromInstructionsCSV(csvText) {
+            if (typeof csvText !== "string" || !csvText.trim()) return "";
+            const lines = csvText.split(/\r?\n/).map((l) => String(l || "").trim()).filter(Boolean);
+            for (let i = lines.length - 1; i >= 0; i--) {
+              const line = lines[i];
+              if (!line || /^timestamp_unix,role,text$/i.test(line)) continue;
+              const m = line.match(/^([0-9]+),([^,]+),"(.*)"$/);
+              let role = "";
+              let text = "";
+              if (m) {
+                role = String(m[2] || "").trim().toUpperCase();
+                text = String(m[3] || "");
+              } else {
+                const parts = line.split(",");
+                if (parts.length < 3) continue;
+                role = String(parts[1] || "").trim().toUpperCase();
+                text = parts.slice(2).join(",");
+                if (text.startsWith("\"") && text.endsWith("\"") && text.length >= 2) {
+                  text = text.slice(1, -1);
+                }
+              }
+              if (role !== "USER") continue;
+              return text.replace(/""/g, "\"").replace(/\\n/g, "\n").trim();
+            }
+            return "";
+          }
+
           function setFollowupBusy(busy) {
             if (!followupBtnEl || !followupInputEl) return;
             const disabled = busy || !followupAllowed;
@@ -833,6 +860,8 @@ data:
               }
 
               const canReadArtifacts = !workName || phase === "Succeeded" || phase === "Failed" || phase === "Error";
+              const instructionCSV = await fetchText(artifactUrl + "logs/instructions.csv");
+              const quickUserInput = latestUserInputFromInstructionsCSV(instructionCSV);
               if (workName) {
                 if (canReadArtifacts) {
                   setFollowupAllowed(true, "");
@@ -841,7 +870,7 @@ data:
                 }
               }
               if (!canReadArtifacts) {
-                embedUserEl.textContent = "(not found yet)";
+                embedUserEl.textContent = quickUserInput || "(not found yet)";
                 embedDialogueEl.textContent = "(not found yet)";
                 embedAgentEl.textContent = "(not found yet)";
                 return;
@@ -851,7 +880,8 @@ data:
               const dialogue = await fetchText(artifactUrl + "dialogue.txt");
               const agent = await fetchText(artifactUrl + "agent.log");
 
-              embedUserEl.textContent = user === null ? "(not found yet)" : (user || "(empty)");
+              const resolvedUser = user === null ? quickUserInput : (user || quickUserInput);
+              embedUserEl.textContent = resolvedUser ? resolvedUser : "(not found yet)";
               embedDialogueEl.textContent = dialogue === null ? "(not found yet)" : (dialogue || "(empty)");
               embedAgentEl.textContent = agent === null ? "(not found yet)" : (agent || "(empty)");
             };

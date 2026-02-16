@@ -1320,7 +1320,16 @@ func buildAgentScript(workName, userScript, userPrompt string) string {
 	return fmt.Sprintf(`set -eu
 WORK=%q
 OUT_DIR="/artifacts/${WORK}"
-mkdir -p "${OUT_DIR}"
+LOGS_DIR="${OUT_DIR}/logs"
+mkdir -p "${OUT_DIR}" "${LOGS_DIR}"
+START_TIME_FILE="${LOGS_DIR}/start-time.txt"
+INSTRUCTIONS_CSV="${LOGS_DIR}/instructions.csv"
+if [ ! -s "${START_TIME_FILE}" ]; then
+  date +%%s > "${START_TIME_FILE}" || true
+fi
+if [ ! -s "${INSTRUCTIONS_CSV}" ]; then
+  printf 'timestamp_unix,role,text\n' > "${INSTRUCTIONS_CSV}" || true
+fi
 
 SCRIPT_B64=%q
 printf '%%s' "${SCRIPT_B64}" | base64 -d > /tmp/nereid-agent.sh
@@ -1329,6 +1338,8 @@ chmod +x /tmp/nereid-agent.sh
 PROMPT_B64=%q
 if [ -n "${PROMPT_B64}" ]; then
   printf '%%s' "${PROMPT_B64}" | base64 -d > "${OUT_DIR}/user-input.txt"
+  prompt_csv=$(awk 'BEGIN{first=1} { gsub(/"/, "\"\""); if (!first) printf "\\n"; printf "%%s", $0; first=0 } END{}' "${OUT_DIR}/user-input.txt")
+  printf '%%s,USER,"%%s"\n' "$(date +%%s)" "${prompt_csv}" >> "${INSTRUCTIONS_CSV}" || true
 fi
 
 export NEREID_WORK_NAME="${WORK}"
@@ -1348,6 +1359,9 @@ set -e
   printf '[AGENT]\n'
   cat "${OUT_DIR}/agent.log"
 } > "${OUT_DIR}/dialogue.txt"
+cp "${OUT_DIR}/agent.log" "${LOGS_DIR}/agent.log" 2>/dev/null || true
+cp "${OUT_DIR}/dialogue.txt" "${LOGS_DIR}/dialogue.txt" 2>/dev/null || true
+cp "${OUT_DIR}/user-input.txt" "${LOGS_DIR}/user-input.txt" 2>/dev/null || true
 
 if [ ! -f "${OUT_DIR}/index.html" ]; then
   cat > "${OUT_DIR}/index.html" <<'HTML'
@@ -1361,6 +1375,8 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
       <li><a href="./user-input.txt">user-input.txt</a></li>
       <li><a href="./dialogue.txt">dialogue.txt</a></li>
       <li><a href="./agent.log">agent.log</a></li>
+      <li><a href="./logs/start-time.txt">logs/start-time.txt</a></li>
+      <li><a href="./logs/instructions.csv">logs/instructions.csv</a></li>
       <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
     </ul>
   </body>
@@ -1385,7 +1401,16 @@ func buildAgentCommandScript(workName string, command, args []string, userPrompt
 	return fmt.Sprintf(`set -eu
 WORK=%q
 OUT_DIR="/artifacts/${WORK}"
-mkdir -p "${OUT_DIR}"
+LOGS_DIR="${OUT_DIR}/logs"
+mkdir -p "${OUT_DIR}" "${LOGS_DIR}"
+START_TIME_FILE="${LOGS_DIR}/start-time.txt"
+INSTRUCTIONS_CSV="${LOGS_DIR}/instructions.csv"
+if [ ! -s "${START_TIME_FILE}" ]; then
+  date +%%s > "${START_TIME_FILE}" || true
+fi
+if [ ! -s "${INSTRUCTIONS_CSV}" ]; then
+  printf 'timestamp_unix,role,text\n' > "${INSTRUCTIONS_CSV}" || true
+fi
 
 export NEREID_WORK_NAME="${WORK}"
 export NEREID_ARTIFACT_DIR="${OUT_DIR}"
@@ -1396,6 +1421,8 @@ printf '%%s' "${CMD_TEXT_B64}" | base64 -d > "${OUT_DIR}/command.txt"
 PROMPT_B64=%q
 if [ -n "${PROMPT_B64}" ]; then
   printf '%%s' "${PROMPT_B64}" | base64 -d > "${OUT_DIR}/user-input.txt"
+  prompt_csv=$(awk 'BEGIN{first=1} { gsub(/"/, "\"\""); if (!first) printf "\\n"; printf "%%s", $0; first=0 } END{}' "${OUT_DIR}/user-input.txt")
+  printf '%%s,USER,"%%s"\n' "$(date +%%s)" "${prompt_csv}" >> "${INSTRUCTIONS_CSV}" || true
 fi
 
 set +e
@@ -1412,6 +1439,9 @@ set -e
   printf '[AGENT]\n'
   cat "${OUT_DIR}/agent.log"
 } > "${OUT_DIR}/dialogue.txt"
+cp "${OUT_DIR}/agent.log" "${LOGS_DIR}/agent.log" 2>/dev/null || true
+cp "${OUT_DIR}/dialogue.txt" "${LOGS_DIR}/dialogue.txt" 2>/dev/null || true
+cp "${OUT_DIR}/user-input.txt" "${LOGS_DIR}/user-input.txt" 2>/dev/null || true
 
 if [ ! -f "${OUT_DIR}/index.html" ]; then
   cat > "${OUT_DIR}/index.html" <<'HTML'
@@ -1426,6 +1456,8 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
       <li><a href="./dialogue.txt">dialogue.txt</a></li>
       <li><a href="./command.txt">command.txt</a></li>
       <li><a href="./agent.log">agent.log</a></li>
+      <li><a href="./logs/start-time.txt">logs/start-time.txt</a></li>
+      <li><a href="./logs/instructions.csv">logs/instructions.csv</a></li>
       <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
     </ul>
   </body>
