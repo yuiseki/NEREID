@@ -380,6 +380,11 @@ Mandatory output contract:
 - If user prompt has multiple bullet/line instructions, treat each line independently.
 - For multiple lines, create one HTML per line (example: task-01.html, task-02.html, ...), and make ./index.html link to all tasks.
 - For map requests, produce an interactive map view in HTML (MapLibre/Leaflet/Cesium are acceptable).
+- For MapLibre base maps, use one of these style URLs:
+  - https://tile.yuiseki.net/styles/osm-bright/style.json
+  - https://tile.yuiseki.net/styles/osm-fiord/style.json
+- If you use Overpass API, use this endpoint: https://overpass.yuiseki.net/api/interpreter?data=
+- If you use Nominatim API, use this endpoint format: https://nominatim.yuiseki.net/search.php?q=<query>
 - Keep generated files self-contained and directly viewable from static hosting.
 - Finish only after writing HTML artifacts to disk.
 `)
