@@ -163,6 +163,35 @@ data:
             margin-bottom: 8px;
             font-size: 13px;
           }
+          .recent-works {
+            margin-top: 14px;
+          }
+          .recent-works h3 {
+            margin: 0 0 8px 0;
+            font-size: 14px;
+            color: #284f78;
+          }
+          .recent-works-list {
+            max-height: 138px;
+            overflow: auto;
+            border: 1px solid #d1e0f0;
+            background: #f7fbff;
+            border-radius: 10px;
+            padding: 8px;
+          }
+          .recent-works-list a {
+            display: block;
+            color: #21456d;
+            text-decoration: none;
+            padding: 4px 2px;
+            border-bottom: 1px dashed #d8e6f4;
+          }
+          .recent-works-list a:last-child {
+            border-bottom: 0;
+          }
+          .recent-works-list a:hover {
+            text-decoration: underline;
+          }
           .status-stage {
             position: relative;
             margin-top: 12px;
@@ -451,6 +480,10 @@ data:
                 <button class="eg" type="button">東京都台東区と東京都文京区と東京都江東区のセブンイレブンとファミリーマートとローソンを表示してください。</button>
                 <button class="eg" type="button">国の名前を青色にしてください。川の名前を黄色にしてください。</button>
               </div>
+              <div class="recent-works">
+                <h3>Recent Works</h3>
+                <div id="recent-works" class="recent-works-list mono">(none)</div>
+              </div>
             </aside>
           </section>
         </main>
@@ -478,6 +511,10 @@ data:
                   <button type="button" id="followup-btn">Send Follow-up</button>
                 </div>
                 <div id="followup-status" class="status mono"></div>
+                <div class="recent-works">
+                  <h3>Recent Works</h3>
+                  <div id="embed-recent-works" class="recent-works-list mono">(none)</div>
+                </div>
               </div>
             </aside>
             <div class="embed-frame-wrap">
@@ -517,10 +554,14 @@ data:
           const followupInputEl = document.getElementById("followup-input");
           const followupBtnEl = document.getElementById("followup-btn");
           const followupStatusEl = document.getElementById("followup-status");
+          const recentWorksEl = document.getElementById("recent-works");
+          const embedRecentWorksEl = document.getElementById("embed-recent-works");
           const rawArtifactsBase = "{{ .Values.artifacts.publicBaseUrl }}".replace(/\/+$/, "");
           const pageIsHTTPS = window.location.protocol === "https:";
           const defaultArtifactsBase = pageIsHTTPS ? rawArtifactsBase.replace(/^http:\/\//i, "https://") : rawArtifactsBase;
           const isEmbedMode = window.location.pathname.replace(/\/+$/, "") === "/embed";
+          const workHistoryStorageKey = "nereid.recentWorkIds.v1";
+          const workHistoryLimit = 40;
 
           function normalizeArtifactUrl(raw) {
             const v = String(raw || "").trim();
@@ -569,6 +610,50 @@ data:
               .replace(/>/g, "&gt;");
           }
 
+          function readRecentWorkIDs() {
+            try {
+              const raw = window.localStorage.getItem(workHistoryStorageKey);
+              if (!raw) return [];
+              const parsed = JSON.parse(raw);
+              if (!Array.isArray(parsed)) return [];
+              return parsed
+                .map((v) => String(v || "").trim())
+                .filter((v) => /^[a-z0-9][a-z0-9-]{6,252}$/.test(v));
+            } catch (_) {
+              return [];
+            }
+          }
+
+          function saveRecentWorkIDs(ids) {
+            try {
+              window.localStorage.setItem(workHistoryStorageKey, JSON.stringify((ids || []).slice(0, workHistoryLimit)));
+            } catch (_) {}
+          }
+
+          function renderRecentWorks() {
+            const ids = readRecentWorkIDs();
+            const targets = [recentWorksEl, embedRecentWorksEl].filter(Boolean);
+            targets.forEach((el) => {
+              if (!el) return;
+              if (!ids.length) {
+                el.textContent = "(none)";
+                return;
+              }
+              el.innerHTML = ids
+                .map((id) => "<a href=\"" + embedURLForWork(id) + "\">" + escapeHTML(id) + "</a>")
+                .join("");
+            });
+          }
+
+          function rememberWorkID(workName) {
+            workName = String(workName || "").trim();
+            if (!/^[a-z0-9][a-z0-9-]{6,252}$/.test(workName)) return;
+            const ids = readRecentWorkIDs().filter((id) => id !== workName);
+            ids.unshift(workName);
+            saveRecentWorkIDs(ids);
+            renderRecentWorks();
+          }
+
           function setEmbedFrameWaiting(message) {
             const body = escapeHTML(message || "Waiting for artifact...");
             embedFrameEl.removeAttribute("src");
@@ -596,6 +681,7 @@ data:
 
             const params = new URLSearchParams(window.location.search);
             const workName = (params.get("work") || "").trim();
+            if (workName) rememberWorkID(workName);
             let artifactUrl = normalizeArtifactUrl(params.get("artifact") || params.get("url"));
 
             if (!artifactUrl && workName) {
@@ -662,6 +748,7 @@ data:
                   });
                   const j = await res.json();
                   if (!res.ok) throw new Error(j.error || ("submit failed: " + res.status));
+                  rememberWorkID(j.workName);
                   if (followupStatusEl) followupStatusEl.textContent = "Submitted. Opening next work...";
                   window.location.href = embedURLForWork(j.workName);
                 } catch (e) {
@@ -845,10 +932,12 @@ data:
           }
 
           if (isEmbedMode) {
+            renderRecentWorks();
             initEmbedMode().catch((e) => {
               if (embedMetaEl) embedMetaEl.textContent = "Embed init failed: " + e.message;
             });
           } else {
+            renderRecentWorks();
             form.addEventListener("submit", async (ev) => {
               ev.preventDefault();
               stopAllTimers();
@@ -877,6 +966,7 @@ data:
                   throw new Error(j.error || ("submit failed: " + res.status));
                 }
                 const workName = j.workName;
+                rememberWorkID(workName);
                 workNameEl.textContent = "Work: " + workName;
                 artifactEl.textContent = "Redirecting to /embed...";
                 updateStage("Submitted", "Submitted. Opening embed...");

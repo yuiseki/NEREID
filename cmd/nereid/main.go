@@ -14,10 +14,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"sigs.k8s.io/yaml"
 )
 
 var nowFunc = time.Now
+var newUUIDv7Func = uuid.NewV7
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {
@@ -191,11 +193,10 @@ func buildTimestampedWorkSpec(path string, now time.Time, grantName string) ([]b
 		meta = map[string]interface{}{}
 	}
 
-	baseName, _ := meta["name"].(string)
-	if baseName == "" {
-		baseName = "work"
+	workName, err := generateWorkIDv7()
+	if err != nil {
+		return nil, "", err
 	}
-	workName := buildTimestampedName(baseName, now)
 	meta["name"] = workName
 	delete(meta, "resourceVersion")
 	delete(meta, "uid")
@@ -259,24 +260,11 @@ func splitGrantFlag(args []string) (string, []string, error) {
 }
 
 func buildTimestampedName(base string, now time.Time) string {
-	prefix := now.UTC().Format("20060102-1504")
-	base = sanitizeName(base)
-	if base == "" {
-		base = "work"
+	workName, err := generateWorkIDv7()
+	if err != nil {
+		return "work"
 	}
-
-	const maxLen = 63
-	maxBase := maxLen - len(prefix) - 1
-	if maxBase < 1 {
-		maxBase = 1
-	}
-	if len(base) > maxBase {
-		base = strings.Trim(base[:maxBase], "-")
-	}
-	if base == "" {
-		base = "work"
-	}
-	return prefix + "-" + base
+	return workName
 }
 
 func sanitizeName(v string) string {
@@ -1100,7 +1088,10 @@ out geom;`,
 }
 
 func buildGeneratedWorkSpec(baseName string, spec map[string]interface{}, now time.Time, userPrompt string) ([]byte, string, error) {
-	workName := buildTimestampedName(baseName, now)
+	workName, err := generateWorkIDv7()
+	if err != nil {
+		return nil, "", err
+	}
 	metadata := map[string]interface{}{
 		"name": workName,
 	}
@@ -1120,6 +1111,14 @@ func buildGeneratedWorkSpec(baseName string, spec map[string]interface{}, now ti
 		return nil, "", fmt.Errorf("encode generated work spec: %w", err)
 	}
 	return out, workName, nil
+}
+
+func generateWorkIDv7() (string, error) {
+	id, err := newUUIDv7Func()
+	if err != nil {
+		return "", fmt.Errorf("generate uuidv7: %w", err)
+	}
+	return strings.ToLower(id.String()), nil
 }
 
 func buildOverpassSpec(title, query string, centerLon, centerLat, zoom float64) map[string]interface{} {

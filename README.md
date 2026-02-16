@@ -27,7 +27,7 @@ For multi-usecase expansion, use `Work` + `nereid-controller` (kind-based job ge
 
 `cmd/nereid` is a thin kubectl wrapper.
 
-`submit` always rewrites `metadata.name` to include the current UTC timestamp prefix (`YYYYMMDD-HHMM-title`) and uses `kubectl create`, so repeated submissions do not overwrite previous `Work` objects.
+`submit` always rewrites `metadata.name` to a UUIDv7-based Work ID and uses `kubectl create`, so repeated submissions do not overwrite previous `Work` objects.
 After successful submit, it also prints `artifactUrl=https://nereid-artifacts.yuiseki.com/<work>/` for easier human/agent logs.
 
 `prompt` accepts instruction text (or a `.txt` file with bullet lines), and submits generated `Work` objects via `kubectl create`.

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -65,6 +66,8 @@ type plannerCredentials struct {
 	key      string
 	provider string
 }
+
+var newUUIDv7Func = uuid.NewV7
 
 type submitRequest struct {
 	Prompt    string `json:"prompt"`
@@ -191,21 +194,17 @@ func (s *server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	now := time.Now().UTC()
 	workNames := make([]string, 0, len(plans))
 	artifactURLs := make([]string, 0, len(plans))
 	annotations := workAnnotations(req.Prompt, "")
-	for i, p := range plans {
-		workName := buildTimestampedName(p.baseName, now.Add(time.Duration(i)*time.Second))
+	for _, p := range plans {
 
 		if grantName != "" {
 			p.spec["grantRef"] = map[string]interface{}{"name": grantName}
 		}
 
-		if createErr := s.createWork(r.Context(), ns, workName, p.spec, annotations); createErr != nil {
-			if apierrors.IsAlreadyExists(createErr) {
-				continue
-			}
+		workName, createErr := s.createWorkWithGeneratedName(r.Context(), ns, p.spec, annotations)
+		if createErr != nil {
 			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("create work failed: %v", createErr)})
 			return
 		}
@@ -273,21 +272,9 @@ func (s *server) handleSubmitAgent(w http.ResponseWriter, r *http.Request) {
 	promptForAgent := composeAgentPrompt(req.Prompt, req.ParentWork, req.FollowupNote)
 	annotations := workAnnotations(promptForAgent, req.ParentWork)
 
-	workName := ""
-	for i := 0; i < 5; i++ {
-		candidate := buildTimestampedName(fmt.Sprintf("gemini-cli-task-%06d", time.Now().UTC().UnixNano()%1_000_000), time.Now().UTC())
-		if err := s.createWork(r.Context(), ns, candidate, spec, annotations); err != nil {
-			if apierrors.IsAlreadyExists(err) {
-				continue
-			}
-			writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("create work failed: %v", err)})
-			return
-		}
-		workName = candidate
-		break
-	}
-	if workName == "" {
-		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": "create work failed: could not allocate unique work name"})
+	workName, err := s.createWorkWithGeneratedName(r.Context(), ns, spec, annotations)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]interface{}{"error": fmt.Sprintf("create work failed: %v", err)})
 		return
 	}
 
@@ -347,6 +334,31 @@ func (s *server) createWork(ctx context.Context, namespace, name string, spec ma
 
 	_, err := s.dynamic.Resource(workGVR).Namespace(namespace).Create(ctx, obj, metav1.CreateOptions{})
 	return err
+}
+
+func (s *server) createWorkWithGeneratedName(ctx context.Context, namespace string, spec map[string]interface{}, annotations map[string]interface{}) (string, error) {
+	for i := 0; i < 8; i++ {
+		workName, err := generateWorkIDv7()
+		if err != nil {
+			return "", err
+		}
+		if err := s.createWork(ctx, namespace, workName, spec, annotations); err != nil {
+			if apierrors.IsAlreadyExists(err) {
+				continue
+			}
+			return "", err
+		}
+		return workName, nil
+	}
+	return "", errors.New("could not allocate unique work id")
+}
+
+func generateWorkIDv7() (string, error) {
+	id, err := newUUIDv7Func()
+	if err != nil {
+		return "", fmt.Errorf("generate uuidv7: %w", err)
+	}
+	return strings.ToLower(id.String()), nil
 }
 
 func composeAgentPrompt(prompt, parentWork, followupContext string) string {
@@ -669,27 +681,6 @@ func artifactURL(base, workName string) string {
 		return ""
 	}
 	return base + "/" + workName + "/"
-}
-
-func buildTimestampedName(base string, now time.Time) string {
-	prefix := now.UTC().Format("20060102-1504")
-	base = sanitizeName(base)
-	if base == "" {
-		base = "work"
-	}
-
-	const maxLen = 63
-	maxBase := maxLen - len(prefix) - 1
-	if maxBase < 1 {
-		maxBase = 1
-	}
-	if len(base) > maxBase {
-		base = strings.Trim(base[:maxBase], "-")
-	}
-	if base == "" {
-		base = "work"
-	}
-	return prefix + "-" + base
 }
 
 func sanitizeName(v string) string {

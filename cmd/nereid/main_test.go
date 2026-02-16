@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,14 +14,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"sigs.k8s.io/yaml"
 )
 
 func TestRunSubmitBuildsKubectlArgs(t *testing.T) {
 	argsFile, stdinFile := setupFakeKubectl(t, 0)
-	oldNow := nowFunc
-	nowFunc = func() time.Time { return time.Date(2026, 2, 15, 7, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { nowFunc = oldNow })
 	specPath := writeWorkSpec(t, "overpass-parks-tokyo")
 
 	var runErr error
@@ -29,10 +29,6 @@ func TestRunSubmitBuildsKubectlArgs(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runSubmit() error = %v", runErr)
 	}
-	if !strings.Contains(stderr, "artifactUrl=http://nereid-artifacts.yuiseki.com/20260215-0704-overpass-parks-tokyo/") {
-		t.Fatalf("runSubmit() stderr did not include artifact URL, got:\n%s", stderr)
-	}
-
 	got := readLines(t, argsFile)
 	want := []string{"create", "-f", "-", "-n", "nereid"}
 	assertLinesEqual(t, got, want)
@@ -43,16 +39,15 @@ func TestRunSubmitBuildsKubectlArgs(t *testing.T) {
 		t.Fatalf("parse kubectl stdin yaml: %v", err)
 	}
 	meta := obj["metadata"].(map[string]interface{})
-	if gotName := meta["name"]; gotName != "20260215-0704-overpass-parks-tokyo" {
-		t.Fatalf("metadata.name mismatch got=%v", gotName)
+	gotName, _ := meta["name"].(string)
+	assertUUIDv7WorkName(t, gotName)
+	if !strings.Contains(stderr, fmt.Sprintf("artifactUrl=http://nereid-artifacts.yuiseki.com/%s/", gotName)) {
+		t.Fatalf("runSubmit() stderr did not include artifact URL, got:\n%s", stderr)
 	}
 }
 
 func TestRunSubmitSupportsGrantFlagInjectsGrantRef(t *testing.T) {
 	argsFile, stdinFile := setupFakeKubectl(t, 0)
-	oldNow := nowFunc
-	nowFunc = func() time.Time { return time.Date(2026, 2, 15, 7, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { nowFunc = oldNow })
 	specPath := writeWorkSpec(t, "overpass-parks-tokyo")
 
 	var runErr error
@@ -62,10 +57,6 @@ func TestRunSubmitSupportsGrantFlagInjectsGrantRef(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runSubmit() error = %v", runErr)
 	}
-	if !strings.Contains(stderr, "artifactUrl=http://nereid-artifacts.yuiseki.com/20260215-0704-overpass-parks-tokyo/") {
-		t.Fatalf("runSubmit() stderr did not include artifact URL, got:\n%s", stderr)
-	}
-
 	got := readLines(t, argsFile)
 	want := []string{"create", "-f", "-", "-n", "nereid"}
 	assertLinesEqual(t, got, want)
@@ -79,6 +70,12 @@ func TestRunSubmitSupportsGrantFlagInjectsGrantRef(t *testing.T) {
 	grantRef := spec["grantRef"].(map[string]interface{})
 	if gotName := grantRef["name"]; gotName != "demo-grant" {
 		t.Fatalf("spec.grantRef.name mismatch got=%v want=%q", gotName, "demo-grant")
+	}
+	meta := obj["metadata"].(map[string]interface{})
+	workName, _ := meta["name"].(string)
+	assertUUIDv7WorkName(t, workName)
+	if !strings.Contains(stderr, fmt.Sprintf("artifactUrl=http://nereid-artifacts.yuiseki.com/%s/", workName)) {
+		t.Fatalf("runSubmit() stderr did not include artifact URL, got:\n%s", stderr)
 	}
 }
 
@@ -151,9 +148,6 @@ func TestPlanWorksFromInstructionTextSupportsRequestedFiveLines(t *testing.T) {
 func TestRunPromptBuildsKubectlArgsAndGeneratedWork(t *testing.T) {
 	argsFile, stdinFile := setupFakeKubectl(t, 0)
 	t.Setenv("NEREID_PROMPT_PLANNER", "rules")
-	oldNow := nowFunc
-	nowFunc = func() time.Time { return time.Date(2026, 2, 15, 7, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { nowFunc = oldNow })
 
 	var runErr error
 	stderr := captureStderr(t, func() {
@@ -162,10 +156,6 @@ func TestRunPromptBuildsKubectlArgsAndGeneratedWork(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runPrompt() error = %v", runErr)
 	}
-	if !strings.Contains(stderr, "artifactUrl=http://nereid-artifacts.yuiseki.com/20260215-0704-taito-parks/") {
-		t.Fatalf("runPrompt() stderr did not include artifact URL, got:\n%s", stderr)
-	}
-
 	got := readLines(t, argsFile)
 	want := []string{"create", "-f", "-", "-n", "nereid", "--dry-run=server", "-o", "name"}
 	assertLinesEqual(t, got, want)
@@ -176,15 +166,17 @@ func TestRunPromptBuildsKubectlArgsAndGeneratedWork(t *testing.T) {
 		t.Fatalf("parse kubectl stdin yaml: %v", err)
 	}
 	meta := obj["metadata"].(map[string]interface{})
-	if gotName := meta["name"]; gotName != "20260215-0704-taito-parks" {
-		t.Fatalf("metadata.name mismatch got=%v", gotName)
-	}
+	workName, _ := meta["name"].(string)
+	assertUUIDv7WorkName(t, workName)
 	annotations, _ := meta["annotations"].(map[string]interface{})
 	if annotations == nil {
 		t.Fatal("metadata.annotations should be set")
 	}
 	if gotPrompt := annotations[userPromptAnnotationKey]; gotPrompt != "東京都台東区の公園を表示してくだい。" {
 		t.Fatalf("metadata.annotations[%q] mismatch got=%v", userPromptAnnotationKey, gotPrompt)
+	}
+	if !strings.Contains(stderr, fmt.Sprintf("artifactUrl=http://nereid-artifacts.yuiseki.com/%s/", workName)) {
+		t.Fatalf("runPrompt() stderr did not include artifact URL, got:\n%s", stderr)
 	}
 	spec := obj["spec"].(map[string]interface{})
 	if gotKind := spec["kind"]; gotKind != "overpassql.map.v1" {
@@ -195,9 +187,6 @@ func TestRunPromptBuildsKubectlArgsAndGeneratedWork(t *testing.T) {
 func TestRunPromptSupportsGrantFlagInjectsGrantRef(t *testing.T) {
 	argsFile, stdinFile := setupFakeKubectl(t, 0)
 	t.Setenv("NEREID_PROMPT_PLANNER", "rules")
-	oldNow := nowFunc
-	nowFunc = func() time.Time { return time.Date(2026, 2, 15, 7, 4, 5, 0, time.UTC) }
-	t.Cleanup(func() { nowFunc = oldNow })
 
 	var runErr error
 	stderr := captureStderr(t, func() {
@@ -206,10 +195,6 @@ func TestRunPromptSupportsGrantFlagInjectsGrantRef(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runPrompt() error = %v", runErr)
 	}
-	if !strings.Contains(stderr, "artifactUrl=http://nereid-artifacts.yuiseki.com/20260215-0704-taito-parks/") {
-		t.Fatalf("runPrompt() stderr did not include artifact URL, got:\n%s", stderr)
-	}
-
 	got := readLines(t, argsFile)
 	want := []string{"create", "-f", "-", "-n", "nereid", "--dry-run=server", "-o", "name"}
 	assertLinesEqual(t, got, want)
@@ -223,6 +208,12 @@ func TestRunPromptSupportsGrantFlagInjectsGrantRef(t *testing.T) {
 	grantRef := spec["grantRef"].(map[string]interface{})
 	if gotName := grantRef["name"]; gotName != "demo-grant" {
 		t.Fatalf("spec.grantRef.name mismatch got=%v want=%q", gotName, "demo-grant")
+	}
+	meta := obj["metadata"].(map[string]interface{})
+	workName, _ := meta["name"].(string)
+	assertUUIDv7WorkName(t, workName)
+	if !strings.Contains(stderr, fmt.Sprintf("artifactUrl=http://nereid-artifacts.yuiseki.com/%s/", workName)) {
+		t.Fatalf("runPrompt() stderr did not include artifact URL, got:\n%s", stderr)
 	}
 }
 
@@ -440,11 +431,26 @@ func TestRunKubectlNonZeroExitReturnsError(t *testing.T) {
 	}
 }
 
-func TestBuildTimestampedNameSanitizesAndAppendsTimestamp(t *testing.T) {
+func TestBuildTimestampedNameReturnsUUIDv7(t *testing.T) {
 	got := buildTimestampedName("Overpass Parks TOKYO!!", time.Date(2026, 2, 15, 6, 33, 13, 0, time.UTC))
-	want := "20260215-0633-overpass-parks-tokyo"
-	if got != want {
-		t.Fatalf("buildTimestampedName() got=%q want=%q", got, want)
+	assertUUIDv7WorkName(t, got)
+}
+
+func TestGenerateWorkIDv7(t *testing.T) {
+	got, err := generateWorkIDv7()
+	if err != nil {
+		t.Fatalf("generateWorkIDv7() error = %v", err)
+	}
+	assertUUIDv7WorkName(t, got)
+}
+
+func TestGenerateWorkIDv7ReturnsErrorWhenGeneratorFails(t *testing.T) {
+	old := newUUIDv7Func
+	newUUIDv7Func = func() (uuid.UUID, error) { return uuid.UUID{}, errors.New("boom") }
+	t.Cleanup(func() { newUUIDv7Func = old })
+
+	if _, err := generateWorkIDv7(); err == nil {
+		t.Fatal("generateWorkIDv7() expected error, got nil")
 	}
 }
 
@@ -465,6 +471,20 @@ func TestUserPromptAnnotationValueTrimsAndTruncates(t *testing.T) {
 	}
 	if len([]byte(got)) != maxUserPromptBytes {
 		t.Fatalf("annotation length got=%d want=%d", len([]byte(got)), maxUserPromptBytes)
+	}
+}
+
+func assertUUIDv7WorkName(t *testing.T, workName string) {
+	t.Helper()
+	if workName == "" {
+		t.Fatal("workName is empty")
+	}
+	id, err := uuid.Parse(workName)
+	if err != nil {
+		t.Fatalf("workName %q is not uuid: %v", workName, err)
+	}
+	if got := id.Version(); got != 7 {
+		t.Fatalf("workName %q version got=%d want=7", workName, got)
 	}
 }
 

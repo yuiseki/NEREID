@@ -1,8 +1,11 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestPlannerCredentialsFromEnvPrefersOpenAI(t *testing.T) {
@@ -151,5 +154,29 @@ func TestComposeAgentPromptIncludesParentAndContext(t *testing.T) {
 	}
 	if !strings.Contains(got, "next instruction") {
 		t.Fatalf("composeAgentPrompt() missing new prompt: %q", got)
+	}
+}
+
+func TestGenerateWorkIDv7(t *testing.T) {
+	idText, err := generateWorkIDv7()
+	if err != nil {
+		t.Fatalf("generateWorkIDv7() error = %v", err)
+	}
+	id, err := uuid.Parse(idText)
+	if err != nil {
+		t.Fatalf("generateWorkIDv7() not uuid: %v", err)
+	}
+	if got := id.Version(); got != 7 {
+		t.Fatalf("generateWorkIDv7() version got=%d want=7", got)
+	}
+}
+
+func TestGenerateWorkIDv7ReturnsErrorWhenGeneratorFails(t *testing.T) {
+	old := newUUIDv7Func
+	newUUIDv7Func = func() (uuid.UUID, error) { return uuid.UUID{}, errors.New("boom") }
+	t.Cleanup(func() { newUUIDv7Func = old })
+
+	if _, err := generateWorkIDv7(); err == nil {
+		t.Fatal("generateWorkIDv7() expected error, got nil")
 	}
 }
