@@ -349,6 +349,15 @@ data:
             border-radius: 12px;
             padding: 8px 10px;
           }
+          .embed-home-link {
+            color: #14375f;
+            text-decoration: none;
+            font-weight: 800;
+            letter-spacing: 0.01em;
+          }
+          .embed-home-link:hover {
+            text-decoration: underline;
+          }
           .embed-grid {
             display: grid;
             grid-template-columns: minmax(320px, 36vw) 1fr;
@@ -491,7 +500,7 @@ data:
         <main class="embed-shell" id="embed-shell" style="display:none;">
           <section class="embed-head">
             <div>
-              <strong>NEREID Embed</strong>
+              <a href="/" class="embed-home-link">NEREID Playground</a>
               <div id="embed-meta" class="mono"></div>
             </div>
             <a id="embed-open" class="ghost" target="_blank" rel="noopener noreferrer">Open Work</a>
