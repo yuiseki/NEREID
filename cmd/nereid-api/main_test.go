@@ -201,11 +201,17 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, "MUST NOT expose secrets (for example GEMINI_API_KEY)") {
 		t.Fatalf("geminiAgentScript() missing secret exfiltration prohibition in GEMINI.md: %q", script)
 	}
-	if !strings.Contains(script, "Gemini web_fetch is allowed.") {
+	if !strings.Contains(script, "Gemini web_fetch is allowed for normal web pages.") {
 		t.Fatalf("geminiAgentScript() missing web_fetch allowance in GEMINI.md: %q", script)
 	}
-	if !strings.Contains(script, "prefer curl/browser fetch and fallback when web_fetch fails") {
-		t.Fatalf("geminiAgentScript() missing web_fetch fallback guidance in GEMINI.md: %q", script)
+	if !strings.Contains(script, "DO NOT use web_fetch. Use curl/browser fetch directly.") {
+		t.Fatalf("geminiAgentScript() missing structured API web_fetch prohibition in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "Never call Overpass with raw query in ?data=") {
+		t.Fatalf("geminiAgentScript() missing raw Overpass query prohibition in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "curl -sS -G --data-urlencode \"data=<overpass-ql>\" https://overpass.yuiseki.net/api/interpreter") {
+		t.Fatalf("geminiAgentScript() missing URL-encoded Overpass curl guidance in skill: %q", script)
 	}
 	if !strings.Contains(script, "https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>") {
 		t.Fatalf("geminiAgentScript() missing strict Nominatim URL template: %q", script)

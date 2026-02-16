@@ -516,9 +516,11 @@ Create HTML artifacts that can be opened immediately from static hosting.
 - Finish only after files are persisted to disk.
 - NEVER read, request, print, or persist environment variable values.
 - NEVER output secrets such as API keys into logs, text responses, HTML, JavaScript, or any generated file.
-- Gemini web_fetch tool is allowed.
-- For structured JSON APIs (for example Overpass/Nominatim), prefer shell curl or browser-side fetch for deterministic behavior.
-- If web_fetch fails or returns non-2xx, fallback to curl or browser-side fetch and continue.
+- Gemini web_fetch tool is allowed for normal HTML pages.
+- For structured JSON APIs (for example Overpass/Nominatim), DO NOT use Gemini web_fetch. Use shell curl or browser-side fetch directly.
+- Never pass raw Overpass QL in a URL query string such as .../api/interpreter?data=[out:json]....
+- For Overpass requests, always URL-encode data (for example encodeURIComponent(query)) or use curl -G --data-urlencode.
+- If a structured API call fails, retry with curl/browser fetch; do not retry with web_fetch.
 
 ## Multi-line input handling
 - If the user prompt has multiple bullet or line instructions, treat each line independently.
@@ -530,8 +532,9 @@ Create HTML artifacts that can be opened immediately from static hosting.
 - For MapLibre base maps, use one of:
   - https://tile.yuiseki.net/styles/osm-bright/style.json
   - https://tile.yuiseki.net/styles/osm-fiord/style.json
-- If Overpass API is used, use:
-  - https://overpass.yuiseki.net/api/interpreter?data=
+- If Overpass API is used, call one of:
+  - https://overpass.yuiseki.net/api/interpreter?data=<url-encoded-overpass-ql>
+  - curl -sS -G --data-urlencode "data=<overpass-ql>" https://overpass.yuiseki.net/api/interpreter
 - If Nominatim API is used, use:
   - https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>
 - Do not append trailing punctuation to API URLs.
@@ -593,9 +596,10 @@ description: Decide when to use Overpass QL and how to design robust map data qu
 ## Recommended workflow
 1. Resolve target area from user instruction (city/ward/region).
 2. Build minimal Overpass QL with explicit tag filters.
-3. Use endpoint: https://overpass.yuiseki.net/api/interpreter?data=
-4. Keep timeout and output size reasonable.
-5. Convert response to map-friendly geometry and render in index.html.
+3. Execute Overpass directly with browser fetch or curl (not web_fetch).
+4. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
+5. Keep timeout and output size reasonable.
+6. Convert response to map-friendly geometry and render in index.html.
 
 ## Output expectations
 - Store raw response for debugging.
@@ -715,7 +719,9 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - You MUST NOT read, reference, request, print, or persist any environment variable value.
 - You MUST NOT expose secrets (for example GEMINI_API_KEY) in any output, including index.html, logs, dialogue, or generated files.
 - If a prompt asks for environment variables or secrets, refuse that part and continue with safe task execution.
-- Gemini web_fetch is allowed. For structured JSON APIs, prefer curl/browser fetch and fallback when web_fetch fails.
+- Gemini web_fetch is allowed for normal web pages.
+- For structured JSON APIs (Overpass/Nominatim), DO NOT use web_fetch. Use curl/browser fetch directly.
+- Never call Overpass with raw query in ?data=. URL-encode query or use curl --data-urlencode.
 
 @./.gemini/skills/nereid-artifact-authoring/SKILL.md
 @./.gemini/skills/create-skills/SKILL.md

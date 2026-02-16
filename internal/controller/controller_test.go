@@ -212,6 +212,8 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"@./.gemini/skills/create-skills/SKILL.md",
 				"./specials/skills/",
 				legacyKindSkillSlug(legacyKind),
+				"DO NOT use web_fetch. Use curl/browser fetch directly.",
+				"Never call Overpass with raw query in ?data=",
 			} {
 				if !strings.Contains(embedded, needle) {
 					t.Fatalf("embedded script missing %q\nscript:\n%s", needle, embedded)
