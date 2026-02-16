@@ -57,6 +57,7 @@ const (
 	followupOfAnnotationKey = "nereid.yuiseki.net/followup-of"
 	maxUserPromptBytes      = 16 * 1024
 	maxFollowupContextBytes = 16 * 1024
+	defaultAgentImage       = "node:22-bookworm-slim"
 
 	plannerProviderOpenAI = "openai"
 	plannerProviderGemini = "gemini"
@@ -395,7 +396,7 @@ func buildGeminiAgentSpec(prompt string) map[string]interface{} {
 		"kind":  "agent.cli.v1",
 		"title": geminiAgentTitle(prompt),
 		"agent": map[string]interface{}{
-			"image":  "node:22-bookworm-slim",
+			"image":  geminiAgentImage(),
 			"script": geminiAgentScript(),
 		},
 		"constraints": map[string]interface{}{
@@ -405,6 +406,13 @@ func buildGeminiAgentSpec(prompt string) map[string]interface{} {
 			"layout": "files",
 		},
 	}
+}
+
+func geminiAgentImage() string {
+	if image := strings.TrimSpace(os.Getenv("NEREID_AGENT_IMAGE")); image != "" {
+		return image
+	}
+	return defaultAgentImage
 }
 
 func geminiAgentTitle(prompt string) string {
@@ -436,12 +444,16 @@ TMP_HTML="${OUT_DIR}/index.generated.tmp.html"
 export HOME="${OUT_DIR}/.home"
 mkdir -p "${HOME}"
 
-if ! command -v pgrep >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq >/dev/null 2>&1 || true
-    apt-get install -y -qq --no-install-recommends procps >/dev/null 2>&1 || true
+MISSING_TOOLS=""
+for cmd in pgrep curl wget; do
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    MISSING_TOOLS="${MISSING_TOOLS} ${cmd}"
   fi
+done
+if [ -n "${MISSING_TOOLS}" ] && command -v apt-get >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git >/dev/null 2>&1 || true
 fi
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
@@ -485,6 +497,10 @@ GEMINI_DIR="${OUT_DIR}/.gemini"
 GEMINI_SETTINGS_FILE="${GEMINI_DIR}/settings.json"
 GEMINI_HOOKS_DIR="${GEMINI_DIR}/hooks"
 INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"
+BIN_DIR="${OUT_DIR}/.bin"
+OSMABLE_WRAPPER_FILE="${BIN_DIR}/osmable"
+HTTP_SERVER_WRAPPER_FILE="${BIN_DIR}/http-server"
+PLAYWRIGHT_CLI_WRAPPER_FILE="${BIN_DIR}/playwright-cli"
 GEMINI_SKILL_DIR="${GEMINI_DIR}/skills/nereid-artifact-authoring"
 GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"
 CREATE_SKILLS_SKILL_FILE="${GEMINI_DIR}/skills/create-skills/SKILL.md"
@@ -497,6 +513,7 @@ KIND_LAZ_SKILL_FILE="${GEMINI_DIR}/skills/laz-3dtiles-v1/SKILL.md"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 mkdir -p "${GEMINI_SKILL_DIR}" \
   "${GEMINI_HOOKS_DIR}" \
+  "${BIN_DIR}" \
   "$(dirname "${CREATE_SKILLS_SKILL_FILE}")" \
   "$(dirname "${KIND_OSMABLE_SKILL_FILE}")" \
   "$(dirname "${KIND_OVERPASS_SKILL_FILE}")" \
@@ -504,6 +521,22 @@ mkdir -p "${GEMINI_SKILL_DIR}" \
   "$(dirname "${KIND_DUCKDB_SKILL_FILE}")" \
   "$(dirname "${KIND_GDAL_SKILL_FILE}")" \
   "$(dirname "${KIND_LAZ_SKILL_FILE}")"
+
+create_npx_wrapper() {
+  local target="$1"
+  local pkg="$2"
+  cat > "${target}" <<WRAP
+#!/usr/bin/env bash
+set -eu
+exec npx -y --loglevel=error --no-update-notifier --no-fund --no-audit ${pkg} "\$@"
+WRAP
+  chmod +x "${target}"
+}
+
+create_npx_wrapper "${OSMABLE_WRAPPER_FILE}" "github:yuiseki/osmable"
+create_npx_wrapper "${HTTP_SERVER_WRAPPER_FILE}" "http-server"
+create_npx_wrapper "${PLAYWRIGHT_CLI_WRAPPER_FILE}" "playwright-cli"
+export PATH="${BIN_DIR}:${PATH}"
 
 cat > "${GEMINI_SKILL_FILE}" <<'SKILL'
 ---
@@ -596,17 +629,17 @@ description: Use osmable CLI for deterministic OSM geocoding, AOI, POI, and rout
 - You need deterministic CLI output instead of fragile free-form web scraping.
 
 ## Core rules
-1. Prefer npx -y osmable ... over direct API calls for geocode/aoi/poi/route tasks.
+1. Prefer osmable ... over direct API calls for geocode/aoi/poi/route tasks.
 2. Use default text output for concise logs and context efficiency.
 3. Use --format json or --format geojson when machine-readable output is required.
-4. Run npx -y osmable doctor before relying on upstream endpoints for critical flows.
+4. Run osmable doctor before relying on upstream endpoints for critical flows.
 
 ## Common commands
-- Geocode: npx -y osmable geocode "東京都台東区" --format json
-- AOI: npx -y osmable aoi resolve "東京都台東区" --format geojson > aoi.geojson
-- POI count: npx -y osmable poi count --tag leisure=park --within "東京都台東区" --format json
-- POI fetch: npx -y osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > parks.geojson
-- Route: npx -y osmable route --from "上野駅" --to "浅草寺" --mode pedestrian --format json > route.json
+- Geocode: osmable geocode "東京都台東区" --format json
+- AOI: osmable aoi resolve "東京都台東区" --format geojson > aoi.geojson
+- POI count: osmable poi count --tag leisure=park --within "東京都台東区" --format json
+- POI fetch: osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > parks.geojson
+- Route: osmable route --from "上野駅" --to "浅草寺" --mode pedestrian --format json > route.json
 
 ## Failure and fallback
 - If osmable fails, capture stderr and exit code in artifacts for debugging.
@@ -632,7 +665,7 @@ description: Decide when to use Overpass QL and how to design robust map data qu
 ## Recommended workflow
 1. Resolve target area from user instruction (city/ward/region).
 2. Build minimal Overpass QL with explicit tag filters.
-3. Prefer npx -y osmable poi count/fetch for deterministic OSM retrieval.
+3. Prefer osmable poi count/fetch for deterministic OSM retrieval.
 4. If manual Overpass execution is required, use browser fetch or curl (not web_fetch).
 5. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
 6. Keep timeout and output size reasonable.
@@ -855,7 +888,18 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - Current instruction is stored at ./user-input.txt.
 - Write output files into the current directory.
 - Persist extracted session skills under ./specials/skills/.
+- Commands available in PATH via npx wrappers: osmable, http-server, playwright-cli.
+- Playwright browser binaries may be missing; install only when browser automation is required.
 GEMINI
+
+TEMPLATE_ROOT="${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}"
+if [ -d "${TEMPLATE_ROOT}/.gemini" ]; then
+  mkdir -p "${OUT_DIR}/.gemini"
+  cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/" >/dev/null 2>&1 || true
+fi
+if [ -f "${TEMPLATE_ROOT}/GEMINI.md" ]; then
+  cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}" >/dev/null 2>&1 || true
+fi
 
 cd "${OUT_DIR}"
 export npm_config_loglevel=error

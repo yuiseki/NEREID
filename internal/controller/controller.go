@@ -44,6 +44,16 @@ const (
 	legacyKindAgentImage = "node:22-bookworm-slim"
 )
 
+func legacyKindAgentImageForJob() string {
+	if image := strings.TrimSpace(os.Getenv("NEREID_LEGACY_AGENT_IMAGE")); image != "" {
+		return image
+	}
+	if image := strings.TrimSpace(os.Getenv("NEREID_AGENT_IMAGE")); image != "" {
+		return image
+	}
+	return legacyKindAgentImage
+}
+
 type Config struct {
 	WorkNamespace     string
 	JobNamespace      string
@@ -216,7 +226,7 @@ func (c *Controller) buildJob(work *unstructured.Unstructured, jobName, kind str
 			return nil, err
 		}
 		userPrompt := legacyKindBridgePrompt(kind, legacySpec)
-		return c.buildScriptJob(work, jobName, legacyKindAgentImage, buildAgentScript(work.GetName(), bridgeScript, userPrompt)), nil
+		return c.buildScriptJob(work, jobName, legacyKindAgentImageForJob(), buildAgentScript(work.GetName(), bridgeScript, userPrompt)), nil
 
 	case "agent.cli.v1":
 		userPrompt := workUserPrompt(work)
@@ -379,6 +389,10 @@ GEMINI_DIR="${OUT_DIR}/.gemini"
 GEMINI_SETTINGS_FILE="${GEMINI_DIR}/settings.json"
 GEMINI_HOOKS_DIR="${GEMINI_DIR}/hooks"
 INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"
+BIN_DIR="${OUT_DIR}/.bin"
+OSMABLE_WRAPPER_FILE="${BIN_DIR}/osmable"
+HTTP_SERVER_WRAPPER_FILE="${BIN_DIR}/http-server"
+PLAYWRIGHT_CLI_WRAPPER_FILE="${BIN_DIR}/playwright-cli"
 COMMON_SKILL_DIR="${GEMINI_DIR}/skills/nereid-artifact-authoring"
 CREATE_SKILLS_DIR="${GEMINI_DIR}/skills/create-skills"
 OSMABLE_SKILL_DIR="${GEMINI_DIR}/skills/osmable-v1"
@@ -386,7 +400,7 @@ KIND_SKILL_DIR="${GEMINI_DIR}/skills/%s"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 
 export HOME="${OUT_DIR}/.home"
-mkdir -p "${HOME}" "${GEMINI_HOOKS_DIR}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${OSMABLE_SKILL_DIR}" "${KIND_SKILL_DIR}"
+mkdir -p "${HOME}" "${GEMINI_HOOKS_DIR}" "${BIN_DIR}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${OSMABLE_SKILL_DIR}" "${KIND_SKILL_DIR}"
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
@@ -419,12 +433,16 @@ if [ -z "${GEMINI_API_KEY:-}" ]; then
   exit 2
 fi
 
-if ! command -v pgrep >/dev/null 2>&1; then
-  if command -v apt-get >/dev/null 2>&1; then
-    export DEBIAN_FRONTEND=noninteractive
-    apt-get update -qq >/dev/null 2>&1 || true
-    apt-get install -y -qq --no-install-recommends procps >/dev/null 2>&1 || true
+MISSING_TOOLS=""
+for cmd in pgrep curl wget; do
+  if ! command -v "${cmd}" >/dev/null 2>&1; then
+    MISSING_TOOLS="${MISSING_TOOLS} ${cmd}"
   fi
+done
+if [ -n "${MISSING_TOOLS}" ] && command -v apt-get >/dev/null 2>&1; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq >/dev/null 2>&1 || true
+  apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git >/dev/null 2>&1 || true
 fi
 
 COMMON_SKILL_B64=%q
@@ -444,6 +462,22 @@ printf '%%s' "${SPEC_B64}" | base64 -d > "${SPEC_FILE}"
 
 PROMPT_B64=%q
 printf '%%s' "${PROMPT_B64}" | base64 -d > "${PROMPT_FILE}"
+
+create_npx_wrapper() {
+  local target="$1"
+  local pkg="$2"
+  cat > "${target}" <<WRAP
+#!/usr/bin/env bash
+set -eu
+exec npx -y --loglevel=error --no-update-notifier --no-fund --no-audit ${pkg} "\$@"
+WRAP
+  chmod +x "${target}"
+}
+
+create_npx_wrapper "${OSMABLE_WRAPPER_FILE}" "github:yuiseki/osmable"
+create_npx_wrapper "${HTTP_SERVER_WRAPPER_FILE}" "http-server"
+create_npx_wrapper "${PLAYWRIGHT_CLI_WRAPPER_FILE}" "playwright-cli"
+export PATH="${BIN_DIR}:${PATH}"
 
 cat > "${INDEX_VALIDATE_HOOK_FILE}" <<'HOOK'
 #!/usr/bin/env bash
@@ -550,7 +584,18 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - Current instruction is available at ./legacy-kind-prompt.txt
 - Persist output artifacts in the current directory.
 - Persist extracted session skills under ./specials/skills/.
+- Commands available in PATH via npx wrappers: osmable, http-server, playwright-cli.
+- Playwright browser binaries may be missing; install only when browser automation is required.
 GEMINI
+
+TEMPLATE_ROOT="${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}"
+if [ -d "${TEMPLATE_ROOT}/.gemini" ]; then
+  mkdir -p "${OUT_DIR}/.gemini"
+  cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/" >/dev/null 2>&1 || true
+fi
+if [ -f "${TEMPLATE_ROOT}/GEMINI.md" ]; then
+  cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}" >/dev/null 2>&1 || true
+fi
 
 cd "${OUT_DIR}"
 export npm_config_loglevel=error
@@ -643,7 +688,7 @@ description: Create static-hostable HTML artifacts in NEREID workspace.
 - Never pass raw Overpass QL in a URL query string such as .../api/interpreter?data=[out:json]....
 - For Overpass requests, always URL-encode data (for example encodeURIComponent(query)) or use curl -G --data-urlencode.
 - If a structured API call fails, retry with curl/browser fetch; do not retry with web_fetch.
-- For OSM geocoding/AOI/POI/routing, prefer npx -y osmable ... for deterministic execution.
+- For OSM geocoding/AOI/POI/routing, prefer osmable ... for deterministic execution.
 
 ## Mapping defaults
 - For map requests, produce an interactive HTML map (MapLibre, Leaflet, or Cesium).
@@ -703,17 +748,17 @@ description: Use osmable CLI for deterministic OSM geocoding, AOI, POI, and rout
 - Deterministic command output is preferred over fragile ad-hoc API calls.
 
 ## Core rules
-1. Prefer npx -y osmable ... for geocode/aoi/poi/route tasks.
+1. Prefer osmable ... for geocode/aoi/poi/route tasks.
 2. Use default text output for concise logs.
 3. Use --format json or --format geojson when machine-readable output is required.
-4. Run npx -y osmable doctor before critical flows.
+4. Run osmable doctor before critical flows.
 
 ## Common commands
-- Geocode: npx -y osmable geocode "東京都台東区" --format json
-- AOI: npx -y osmable aoi resolve "東京都台東区" --format geojson > aoi.geojson
-- POI count: npx -y osmable poi count --tag leisure=park --within "東京都台東区" --format json
-- POI fetch: npx -y osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > parks.geojson
-- Route: npx -y osmable route --from "上野駅" --to "浅草寺" --mode pedestrian --format json > route.json
+- Geocode: osmable geocode "東京都台東区" --format json
+- AOI: osmable aoi resolve "東京都台東区" --format geojson > aoi.geojson
+- POI count: osmable poi count --tag leisure=park --within "東京都台東区" --format json
+- POI fetch: osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > parks.geojson
+- Route: osmable route --from "上野駅" --to "浅草寺" --mode pedestrian --format json > route.json
 
 ## Failure and fallback
 - If osmable fails, capture stderr and exit code in artifacts.
@@ -742,7 +787,7 @@ description: Decide when to use Overpass QL and how to design robust map data qu
 ## Recommended workflow
 1. Read target area intent from instruction and/or spec.
 2. Build explicit tag filters with bounded scope.
-3. Prefer npx -y osmable poi count/fetch for deterministic OSM retrieval.
+3. Prefer osmable poi count/fetch for deterministic OSM retrieval.
 4. If manual Overpass execution is required, use browser fetch or curl (not web_fetch).
 5. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter.
 6. Persist raw response and render map-friendly output.

@@ -1,0 +1,17 @@
+{
+  "hooks": {
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "validate-index-html",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh",
+            "timeout": 5000
+          }
+        ]
+      }
+    ]
+  }
+}

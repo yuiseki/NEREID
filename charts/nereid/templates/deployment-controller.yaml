@@ -32,6 +32,13 @@ spec:
             - --artifact-base-url={{ .Values.controller.artifactBaseUrl | default .Values.artifacts.publicBaseUrl }}
             - --artifact-retention={{ .Values.controller.artifactRetention }}
             - --resync-interval={{ .Values.controller.resyncInterval }}
+          env:
+            - name: NEREID_AGENT_IMAGE
+              value: {{ .Values.agentRuntime.image | quote }}
+            {{- if .Values.agentRuntime.legacyImage }}
+            - name: NEREID_LEGACY_AGENT_IMAGE
+              value: {{ .Values.agentRuntime.legacyImage | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.controller.resources | nindent 12 }}
           volumeMounts:

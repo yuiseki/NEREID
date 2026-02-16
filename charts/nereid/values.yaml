@@ -23,6 +23,12 @@ images:
   api: debian:bookworm-slim
   controller: debian:bookworm-slim
 
+agentRuntime:
+  # Image used by generated agent.cli.v1 works (spec.agent.image default).
+  image: node:22-bookworm-slim
+  # Optional override only for legacy kind bridge jobs.
+  legacyImage: ""
+
 api:
   # Host path of locally built API binary mounted into the API pod.
   binaryHostPath: /home/yuiseki/src/github.com/yuiseki/NEREID/bin/nereid-api

@@ -189,6 +189,45 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, `INDEX_VALIDATE_HOOK_FILE="${GEMINI_HOOKS_DIR}/validate-index.sh"`) {
 		t.Fatalf("geminiAgentScript() missing index validation hook path: %q", script)
 	}
+	if !strings.Contains(script, `OSMABLE_WRAPPER_FILE="${BIN_DIR}/osmable"`) {
+		t.Fatalf("geminiAgentScript() missing osmable wrapper path: %q", script)
+	}
+	if !strings.Contains(script, `HTTP_SERVER_WRAPPER_FILE="${BIN_DIR}/http-server"`) {
+		t.Fatalf("geminiAgentScript() missing http-server wrapper path: %q", script)
+	}
+	if !strings.Contains(script, `PLAYWRIGHT_CLI_WRAPPER_FILE="${BIN_DIR}/playwright-cli"`) {
+		t.Fatalf("geminiAgentScript() missing playwright-cli wrapper path: %q", script)
+	}
+	if !strings.Contains(script, `exec npx -y --loglevel=error --no-update-notifier --no-fund --no-audit ${pkg} "\$@"`) {
+		t.Fatalf("geminiAgentScript() missing generic npx wrapper body: %q", script)
+	}
+	if !strings.Contains(script, `create_npx_wrapper "${OSMABLE_WRAPPER_FILE}" "github:yuiseki/osmable"`) {
+		t.Fatalf("geminiAgentScript() missing osmable wrapper registration: %q", script)
+	}
+	if !strings.Contains(script, `create_npx_wrapper "${HTTP_SERVER_WRAPPER_FILE}" "http-server"`) {
+		t.Fatalf("geminiAgentScript() missing http-server wrapper registration: %q", script)
+	}
+	if !strings.Contains(script, `create_npx_wrapper "${PLAYWRIGHT_CLI_WRAPPER_FILE}" "playwright-cli"`) {
+		t.Fatalf("geminiAgentScript() missing playwright-cli wrapper registration: %q", script)
+	}
+	if !strings.Contains(script, "Playwright browser binaries may be missing") {
+		t.Fatalf("geminiAgentScript() missing Playwright runtime note in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "Commands available in PATH via npx wrappers: osmable, http-server, playwright-cli.") {
+		t.Fatalf("geminiAgentScript() missing wrapper runtime facts in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, `TEMPLATE_ROOT="${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}"`) {
+		t.Fatalf("geminiAgentScript() missing template root wiring: %q", script)
+	}
+	if !strings.Contains(script, `cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/"`) {
+		t.Fatalf("geminiAgentScript() missing template .gemini copy: %q", script)
+	}
+	if !strings.Contains(script, `cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}"`) {
+		t.Fatalf("geminiAgentScript() missing template GEMINI.md copy: %q", script)
+	}
+	if !strings.Contains(script, `export PATH="${BIN_DIR}:${PATH}"`) {
+		t.Fatalf("geminiAgentScript() missing PATH update for wrappers: %q", script)
+	}
 	if !strings.Contains(script, `"AfterAgent"`) {
 		t.Fatalf("geminiAgentScript() missing AfterAgent hook configuration: %q", script)
 	}
@@ -198,7 +237,7 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, `{"decision":"deny","reason":"%s"}`) {
 		t.Fatalf("geminiAgentScript() missing hook deny output contract: %q", script)
 	}
-	if !strings.Contains(script, "npx -y osmable doctor") {
+	if !strings.Contains(script, "osmable doctor") {
 		t.Fatalf("geminiAgentScript() missing osmable guidance in skill body: %q", script)
 	}
 	if !strings.Contains(script, "Workspace skills are available under ./.gemini/skills/.") {
@@ -234,8 +273,8 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, "https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>") {
 		t.Fatalf("geminiAgentScript() missing strict Nominatim URL template: %q", script)
 	}
-	if !strings.Contains(script, "apt-get install -y -qq --no-install-recommends procps") {
-		t.Fatalf("geminiAgentScript() missing pgrep bootstrap for slim image: %q", script)
+	if !strings.Contains(script, "apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git") {
+		t.Fatalf("geminiAgentScript() missing bootstrap for pgrep/curl/wget/git tools: %q", script)
 	}
 	if !strings.Contains(script, `GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-flash}}"`) {
 		t.Fatalf("geminiAgentScript() missing gemini-2.5-flash model default: %q", script)
@@ -262,6 +301,20 @@ func TestGenerateWorkIDv7(t *testing.T) {
 	}
 	if got := id.Version(); got != 7 {
 		t.Fatalf("generateWorkIDv7() version got=%d want=7", got)
+	}
+}
+
+func TestGeminiAgentImageUsesEnvOverride(t *testing.T) {
+	t.Setenv("NEREID_AGENT_IMAGE", "ghcr.io/yuiseki/nereid-agent-runtime:test")
+	if got := geminiAgentImage(); got != "ghcr.io/yuiseki/nereid-agent-runtime:test" {
+		t.Fatalf("geminiAgentImage() got=%q", got)
+	}
+}
+
+func TestGeminiAgentImageDefaults(t *testing.T) {
+	t.Setenv("NEREID_AGENT_IMAGE", "")
+	if got := geminiAgentImage(); got != defaultAgentImage {
+		t.Fatalf("geminiAgentImage() got=%q want=%q", got, defaultAgentImage)
 	}
 }
 

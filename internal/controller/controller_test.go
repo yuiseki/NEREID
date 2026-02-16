@@ -26,6 +26,30 @@ func TestMakeJobNameStableAndBounded(t *testing.T) {
 	}
 }
 
+func TestLegacyKindAgentImageForJobPrefersLegacyOverride(t *testing.T) {
+	t.Setenv("NEREID_AGENT_IMAGE", "ghcr.io/yuiseki/nereid-agent-runtime:base")
+	t.Setenv("NEREID_LEGACY_AGENT_IMAGE", "ghcr.io/yuiseki/nereid-agent-runtime:legacy")
+	if got := legacyKindAgentImageForJob(); got != "ghcr.io/yuiseki/nereid-agent-runtime:legacy" {
+		t.Fatalf("legacyKindAgentImageForJob() got=%q", got)
+	}
+}
+
+func TestLegacyKindAgentImageForJobFallsBackToSharedOverride(t *testing.T) {
+	t.Setenv("NEREID_AGENT_IMAGE", "ghcr.io/yuiseki/nereid-agent-runtime:base")
+	t.Setenv("NEREID_LEGACY_AGENT_IMAGE", "")
+	if got := legacyKindAgentImageForJob(); got != "ghcr.io/yuiseki/nereid-agent-runtime:base" {
+		t.Fatalf("legacyKindAgentImageForJob() got=%q", got)
+	}
+}
+
+func TestLegacyKindAgentImageForJobDefaults(t *testing.T) {
+	t.Setenv("NEREID_AGENT_IMAGE", "")
+	t.Setenv("NEREID_LEGACY_AGENT_IMAGE", "")
+	if got := legacyKindAgentImageForJob(); got != legacyKindAgentImage {
+		t.Fatalf("legacyKindAgentImageForJob() got=%q want=%q", got, legacyKindAgentImage)
+	}
+}
+
 func TestPruneArtifactsRemovesEntriesOlderThanRetention(t *testing.T) {
 	root := t.TempDir()
 	oldPath := filepath.Join(root, "old-work")
@@ -211,10 +235,20 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"legacy-kind-prompt.txt",
 				"OSMABLE_SKILL_DIR=\"${GEMINI_DIR}/skills/osmable-v1\"",
 				"OSMABLE_SKILL_B64=\"",
+				"OSMABLE_WRAPPER_FILE=\"${BIN_DIR}/osmable\"",
+				"create_npx_wrapper \"${OSMABLE_WRAPPER_FILE}\" \"github:yuiseki/osmable\"",
+				"HTTP_SERVER_WRAPPER_FILE=\"${BIN_DIR}/http-server\"",
+				"PLAYWRIGHT_CLI_WRAPPER_FILE=\"${BIN_DIR}/playwright-cli\"",
+				"create_npx_wrapper \"${HTTP_SERVER_WRAPPER_FILE}\" \"http-server\"",
+				"create_npx_wrapper \"${PLAYWRIGHT_CLI_WRAPPER_FILE}\" \"playwright-cli\"",
+				"export PATH=\"${BIN_DIR}:${PATH}\"",
 				"GEMINI_SETTINGS_FILE=\"${GEMINI_DIR}/settings.json\"",
 				"INDEX_VALIDATE_HOOK_FILE=\"${GEMINI_HOOKS_DIR}/validate-index.sh\"",
+				"TEMPLATE_ROOT=\"${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}\"",
+				"cp -R \"${TEMPLATE_ROOT}/.gemini/.\" \"${OUT_DIR}/.gemini/\"",
 				"\"name\": \"validate-index-html\"",
 				"\"command\": \"$GEMINI_PROJECT_DIR/.gemini/hooks/validate-index.sh\"",
+				"apt-get install -y -qq --no-install-recommends procps curl wget ca-certificates git",
 				"./specials/skills/",
 				legacyKindSkillSlug(legacyKind),
 				"DO NOT use web_fetch. Use curl/browser fetch directly.",
@@ -226,7 +260,7 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				}
 			}
 			osmableSkill := decodeEmbeddedB64Var(t, embedded, "OSMABLE_SKILL_B64")
-			if !strings.Contains(osmableSkill, "npx -y osmable doctor") {
+			if !strings.Contains(osmableSkill, "osmable doctor") {
 				t.Fatalf("decoded osmable skill missing doctor guidance:\n%s", osmableSkill)
 			}
 			if strings.Contains(embedded, "@./.gemini/skills/") {

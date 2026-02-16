@@ -40,6 +40,8 @@ spec:
               value: {{ .Values.api.llmBaseUrl | quote }}
             - name: NEREID_LLM_MODEL
               value: {{ .Values.api.llmModel | quote }}
+            - name: NEREID_AGENT_IMAGE
+              value: {{ .Values.agentRuntime.image | quote }}
             {{- if .Values.api.geminiModel }}
             - name: NEREID_GEMINI_MODEL
               value: {{ .Values.api.geminiModel | quote }}
