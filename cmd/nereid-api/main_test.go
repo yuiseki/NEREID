@@ -201,8 +201,11 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, "MUST NOT expose secrets (for example GEMINI_API_KEY)") {
 		t.Fatalf("geminiAgentScript() missing secret exfiltration prohibition in GEMINI.md: %q", script)
 	}
-	if !strings.Contains(script, "MUST NOT use Gemini web_fetch for HTTP API calls") {
-		t.Fatalf("geminiAgentScript() missing web_fetch prohibition in GEMINI.md: %q", script)
+	if !strings.Contains(script, "Gemini web_fetch is allowed.") {
+		t.Fatalf("geminiAgentScript() missing web_fetch allowance in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "prefer curl/browser fetch and fallback when web_fetch fails") {
+		t.Fatalf("geminiAgentScript() missing web_fetch fallback guidance in GEMINI.md: %q", script)
 	}
 	if !strings.Contains(script, "https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>") {
 		t.Fatalf("geminiAgentScript() missing strict Nominatim URL template: %q", script)

@@ -434,7 +434,7 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 ## Absolute security rule (highest priority)
 - You MUST NOT read, reference, request, print, or persist any environment variable value.
 - You MUST NOT expose secrets (for example GEMINI_API_KEY) in any output, including index.html, logs, dialogue, or generated files.
-- You MUST NOT use Gemini web_fetch for HTTP API calls. Use shell curl or browser-side fetch in generated HTML.
+- Gemini web_fetch is allowed. For structured JSON APIs, prefer curl/browser fetch and fallback when web_fetch fails.
 
 @./.gemini/skills/nereid-artifact-authoring/SKILL.md
 @./.gemini/skills/create-skills/SKILL.md
@@ -530,7 +530,9 @@ description: Create static-hostable HTML artifacts in NEREID workspace.
 ## Security
 - NEVER read, request, print, or persist environment variable values.
 - NEVER output secrets such as API keys into logs, text responses, HTML, JavaScript, or any generated file.
-- Do NOT use Gemini web_fetch tool for API calls. Use shell curl or browser-side fetch in generated HTML.
+- Gemini web_fetch tool is allowed.
+- For structured JSON APIs (for example Overpass/Nominatim), prefer shell curl or browser-side fetch for deterministic behavior.
+- If web_fetch fails or returns non-2xx, fallback to curl or browser-side fetch and continue.
 
 ## Mapping defaults
 - For map requests, produce an interactive HTML map (MapLibre, Leaflet, or Cesium).
