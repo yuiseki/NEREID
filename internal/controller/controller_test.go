@@ -112,6 +112,8 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"user-input.txt",
 				"dialogue.txt",
 				"agent.log",
+				"SPECIALS_DIR=\"${OUT_DIR}/specials\"",
+				"SPECIALS_SKILLS_DIR=\"${SPECIALS_DIR}/skills\"",
 				"https://nereid.yuiseki.net/embed?work=legacy-kind-sample",
 			} {
 				if !strings.Contains(wrapper, needle) {
@@ -125,6 +127,8 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"GEMINI_MD_FILE",
 				"@google/gemini-cli",
 				"legacy-kind-prompt.txt",
+				"@./.gemini/skills/create-skills/SKILL.md",
+				"./specials/skills/",
 				legacyKindSkillSlug(legacyKind),
 			} {
 				if !strings.Contains(embedded, needle) {
@@ -199,6 +203,8 @@ func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {
 		"NEREID_WORK_NAME",
 		"NEREID_ARTIFACT_DIR",
 		"LOGS_DIR=\"${OUT_DIR}/logs\"",
+		"SPECIALS_DIR=\"${OUT_DIR}/specials\"",
+		"SPECIALS_SKILLS_DIR=\"${SPECIALS_DIR}/skills\"",
 		"start-time.txt",
 		"instructions.csv",
 		"timestamp_unix,role,text",
@@ -206,6 +212,7 @@ func TestBuildJobAgentCLIGeneratesCommandWrapperScript(t *testing.T) {
 		"user-input.txt",
 		"dialogue.txt",
 		"agent.log",
+		"./specials/skills/",
 		"https://nereid.yuiseki.net/embed?work=agent-cli-sample",
 		"'@google/gemini-cli'",
 	} {

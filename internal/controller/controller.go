@@ -352,23 +352,27 @@ func buildLegacyKindBridgeScript(kind string, spec map[string]interface{}) (stri
 	}
 
 	commonSkillB64 := base64.StdEncoding.EncodeToString([]byte(legacyCommonSkillDoc()))
+	createSkillsB64 := base64.StdEncoding.EncodeToString([]byte(legacyCreateSkillsSkillDoc()))
 	kindSkillB64 := base64.StdEncoding.EncodeToString([]byte(skillDoc))
 	specB64 := base64.StdEncoding.EncodeToString(specJSON)
 	promptB64 := base64.StdEncoding.EncodeToString([]byte(legacyKindBridgePromptText(kind)))
 
 	return fmt.Sprintf(`set -eu
 OUT_DIR="${NEREID_ARTIFACT_DIR:-/artifacts/${NEREID_WORK_NAME:-work}}"
-mkdir -p "${OUT_DIR}"
+SPECIALS_DIR="${OUT_DIR}/specials"
+SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"
+mkdir -p "${OUT_DIR}" "${SPECIALS_SKILLS_DIR}"
 OUT_TEXT="${OUT_DIR}/gemini-output.txt"
 OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
 PROMPT_FILE="${OUT_DIR}/legacy-kind-prompt.txt"
 SPEC_FILE="${OUT_DIR}/legacy-work-spec.json"
 COMMON_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
+CREATE_SKILLS_DIR="${OUT_DIR}/.gemini/skills/create-skills"
 KIND_SKILL_DIR="${OUT_DIR}/.gemini/skills/%s"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 
 export HOME="${OUT_DIR}/.home"
-mkdir -p "${HOME}" "${COMMON_SKILL_DIR}" "${KIND_SKILL_DIR}"
+mkdir -p "${HOME}" "${COMMON_SKILL_DIR}" "${CREATE_SKILLS_DIR}" "${KIND_SKILL_DIR}"
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
@@ -412,6 +416,9 @@ fi
 COMMON_SKILL_B64=%q
 printf '%%s' "${COMMON_SKILL_B64}" | base64 -d > "${COMMON_SKILL_DIR}/SKILL.md"
 
+CREATE_SKILLS_B64=%q
+printf '%%s' "${CREATE_SKILLS_B64}" | base64 -d > "${CREATE_SKILLS_DIR}/SKILL.md"
+
 KIND_SKILL_B64=%q
 printf '%%s' "${KIND_SKILL_B64}" | base64 -d > "${KIND_SKILL_DIR}/SKILL.md"
 
@@ -430,12 +437,14 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - You MUST NOT use Gemini web_fetch for HTTP API calls. Use shell curl or browser-side fetch in generated HTML.
 
 @./.gemini/skills/nereid-artifact-authoring/SKILL.md
+@./.gemini/skills/create-skills/SKILL.md
 @./.gemini/skills/%s/SKILL.md
 
 ## Runtime facts
 - Legacy work specification is available at ./legacy-work-spec.json
 - Current instruction is available at ./legacy-kind-prompt.txt
 - Persist output artifacts in the current directory.
+- Persist extracted session skills under ./specials/skills/.
 GEMINI
 
 cd "${OUT_DIR}"
@@ -492,7 +501,7 @@ fi
 
 cat "${OUT_TEXT}"
 exit "${status}"
-`, skillSlug, commonSkillB64, kindSkillB64, specB64, promptB64, skillSlug), nil
+`, skillSlug, commonSkillB64, createSkillsB64, kindSkillB64, specB64, promptB64, skillSlug), nil
 }
 
 func legacyKindSkillSlug(kind string) string {
@@ -532,6 +541,36 @@ description: Create static-hostable HTML artifacts in NEREID workspace.
   - https://overpass.yuiseki.net/api/interpreter?data=
 - If Nominatim API is used, use:
   - https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>
+`
+}
+
+func legacyCreateSkillsSkillDoc() string {
+	return `---
+name: create-skills
+description: Extract reusable lessons from this session and persist them as local skill documents under specials/skills.
+---
+# Create Session Skills
+
+## Goal
+- Persist reusable operational knowledge from the current task as skill documents.
+
+## Required behavior
+- Before finishing, write at least one skill directory under ./specials/skills/.
+- For each created skill, create ./specials/skills/<skill-name>/SKILL.md.
+- The frontmatter name must exactly match <skill-name>.
+- Keep each SKILL.md focused on reusable decision rules, not task-specific narration.
+- Use this structure in each SKILL.md:
+  1. Trigger patterns
+  2. Decision rule
+  3. Execution steps
+  4. Failure signals and fallback
+- Use lowercase letters, digits, and hyphens for <skill-name>.
+- Add scripts/, references/, and assets/ only when needed.
+- Never include secrets, environment variables, or user-private sensitive content.
+
+## Scope
+- Save only local session skills in ./specials/skills/.
+- Do not modify global NEREID runtime code or external skill repositories.
 `
 }
 
@@ -687,7 +726,9 @@ func buildAgentScript(workName, userScript, userPrompt string) string {
 WORK=%q
 OUT_DIR="/artifacts/${WORK}"
 LOGS_DIR="${OUT_DIR}/logs"
-mkdir -p "${OUT_DIR}" "${LOGS_DIR}"
+SPECIALS_DIR="${OUT_DIR}/specials"
+SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"
+mkdir -p "${OUT_DIR}" "${LOGS_DIR}" "${SPECIALS_SKILLS_DIR}"
 START_TIME_FILE="${LOGS_DIR}/start-time.txt"
 INSTRUCTIONS_CSV="${LOGS_DIR}/instructions.csv"
 if [ ! -s "${START_TIME_FILE}" ]; then
@@ -743,6 +784,8 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
       <li><a href="./agent.log">agent.log</a></li>
       <li><a href="./logs/start-time.txt">logs/start-time.txt</a></li>
       <li><a href="./logs/instructions.csv">logs/instructions.csv</a></li>
+      <li><a href="./specials/">specials/</a></li>
+      <li><a href="./specials/skills/">specials/skills/</a></li>
       <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
     </ul>
   </body>
@@ -768,7 +811,9 @@ func buildAgentCommandScript(workName string, command, args []string, userPrompt
 WORK=%q
 OUT_DIR="/artifacts/${WORK}"
 LOGS_DIR="${OUT_DIR}/logs"
-mkdir -p "${OUT_DIR}" "${LOGS_DIR}"
+SPECIALS_DIR="${OUT_DIR}/specials"
+SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"
+mkdir -p "${OUT_DIR}" "${LOGS_DIR}" "${SPECIALS_SKILLS_DIR}"
 START_TIME_FILE="${LOGS_DIR}/start-time.txt"
 INSTRUCTIONS_CSV="${LOGS_DIR}/instructions.csv"
 if [ ! -s "${START_TIME_FILE}" ]; then
@@ -824,6 +869,8 @@ if [ ! -f "${OUT_DIR}/index.html" ]; then
       <li><a href="./agent.log">agent.log</a></li>
       <li><a href="./logs/start-time.txt">logs/start-time.txt</a></li>
       <li><a href="./logs/instructions.csv">logs/instructions.csv</a></li>
+      <li><a href="./specials/">specials/</a></li>
+      <li><a href="./specials/skills/">specials/skills/</a></li>
       <li><a href="https://nereid.yuiseki.net/embed?work=%s">open embed</a></li>
     </ul>
   </body>

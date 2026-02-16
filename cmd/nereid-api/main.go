@@ -426,7 +426,9 @@ func geminiAgentTitle(prompt string) string {
 func geminiAgentScript() string {
 	return `set -eu
 OUT_DIR="${NEREID_ARTIFACT_DIR:-/artifacts/${NEREID_WORK_NAME:-work}}"
-mkdir -p "${OUT_DIR}"
+SPECIALS_DIR="${OUT_DIR}/specials"
+SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"
+mkdir -p "${OUT_DIR}" "${SPECIALS_SKILLS_DIR}"
 PROMPT_FILE="${OUT_DIR}/user-input.txt"
 OUT_TEXT="${OUT_DIR}/gemini-output.txt"
 OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
@@ -481,6 +483,7 @@ fi
 
 GEMINI_SKILL_DIR="${OUT_DIR}/.gemini/skills/nereid-artifact-authoring"
 GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"
+CREATE_SKILLS_SKILL_FILE="${OUT_DIR}/.gemini/skills/create-skills/SKILL.md"
 KIND_OVERPASS_SKILL_FILE="${OUT_DIR}/.gemini/skills/overpassql-map-v1/SKILL.md"
 KIND_STYLE_SKILL_FILE="${OUT_DIR}/.gemini/skills/maplibre-style-v1/SKILL.md"
 KIND_DUCKDB_SKILL_FILE="${OUT_DIR}/.gemini/skills/duckdb-map-v1/SKILL.md"
@@ -488,6 +491,7 @@ KIND_GDAL_SKILL_FILE="${OUT_DIR}/.gemini/skills/gdal-rastertile-v1/SKILL.md"
 KIND_LAZ_SKILL_FILE="${OUT_DIR}/.gemini/skills/laz-3dtiles-v1/SKILL.md"
 GEMINI_MD_FILE="${OUT_DIR}/GEMINI.md"
 mkdir -p "${GEMINI_SKILL_DIR}" \
+  "$(dirname "${CREATE_SKILLS_SKILL_FILE}")" \
   "$(dirname "${KIND_OVERPASS_SKILL_FILE}")" \
   "$(dirname "${KIND_STYLE_SKILL_FILE}")" \
   "$(dirname "${KIND_DUCKDB_SKILL_FILE}")" \
@@ -535,6 +539,35 @@ Create HTML artifacts that can be opened immediately from static hosting.
 ## Output quality
 - Keep generated artifacts self-contained and directly viewable from static hosting.
 SKILL
+
+cat > "${CREATE_SKILLS_SKILL_FILE}" <<'SKILL_CREATE'
+---
+name: create-skills
+description: Extract reusable lessons from this session and persist them as local skill documents under specials/skills.
+---
+# Create Session Skills
+
+## Goal
+- Persist reusable operational knowledge from the current task as skill documents.
+
+## Required behavior
+- Before finishing, write at least one skill directory under ./specials/skills/.
+- For each created skill, create ./specials/skills/<skill-name>/SKILL.md.
+- The frontmatter name must exactly match <skill-name>.
+- Keep each SKILL.md focused on reusable decision rules, not task-specific narration.
+- Use this structure in each SKILL.md:
+  1. Trigger patterns
+  2. Decision rule
+  3. Execution steps
+  4. Failure signals and fallback
+- Use lowercase letters, digits, and hyphens for <skill-name>.
+- Add scripts/, references/, and assets/ only when needed.
+- Never include secrets, environment variables, or user-private sensitive content.
+
+## Scope
+- Save only local session skills in ./specials/skills/.
+- Do not modify global NEREID runtime code or external skill repositories.
+SKILL_CREATE
 
 cat > "${KIND_OVERPASS_SKILL_FILE}" <<'SKILL_OVERPASS'
 ---
@@ -680,6 +713,7 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - You MUST NOT use Gemini web_fetch for HTTP API calls. Use shell curl or browser-side fetch in generated HTML.
 
 @./.gemini/skills/nereid-artifact-authoring/SKILL.md
+@./.gemini/skills/create-skills/SKILL.md
 @./.gemini/skills/overpassql-map-v1/SKILL.md
 @./.gemini/skills/maplibre-style-v1/SKILL.md
 @./.gemini/skills/duckdb-map-v1/SKILL.md
@@ -690,6 +724,7 @@ cat > "${GEMINI_MD_FILE}" <<'GEMINI'
 - You are operating inside one NEREID artifact workspace.
 - Current instruction is stored at ./user-input.txt.
 - Write output files into the current directory.
+- Persist extracted session skills under ./specials/skills/.
 GEMINI
 
 cd "${OUT_DIR}"

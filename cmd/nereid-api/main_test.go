@@ -174,8 +174,17 @@ func TestGeminiAgentScriptGeneratesGeminiMdAndSkill(t *testing.T) {
 	if !strings.Contains(script, `GEMINI_SKILL_FILE="${GEMINI_SKILL_DIR}/SKILL.md"`) {
 		t.Fatalf("geminiAgentScript() missing skill generation: %q", script)
 	}
+	if !strings.Contains(script, `CREATE_SKILLS_SKILL_FILE="${OUT_DIR}/.gemini/skills/create-skills/SKILL.md"`) {
+		t.Fatalf("geminiAgentScript() missing create-skills skill generation: %q", script)
+	}
+	if !strings.Contains(script, `SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"`) {
+		t.Fatalf("geminiAgentScript() missing specials/skills output directory: %q", script)
+	}
 	if !strings.Contains(script, "@./.gemini/skills/nereid-artifact-authoring/SKILL.md") {
 		t.Fatalf("geminiAgentScript() missing skill import in GEMINI.md: %q", script)
+	}
+	if !strings.Contains(script, "@./.gemini/skills/create-skills/SKILL.md") {
+		t.Fatalf("geminiAgentScript() missing create-skills import in GEMINI.md: %q", script)
 	}
 	if !strings.Contains(script, "@./.gemini/skills/overpassql-map-v1/SKILL.md") {
 		t.Fatalf("geminiAgentScript() missing overpass strategy skill import: %q", script)
