@@ -12,7 +12,6 @@ import (
 	"strconv"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"sigs.k8s.io/yaml"
@@ -429,11 +428,6 @@ func TestRunKubectlNonZeroExitReturnsError(t *testing.T) {
 	if !strings.Contains(err.Error(), "kubectl [get work] failed") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-}
-
-func TestBuildTimestampedNameReturnsUUIDv7(t *testing.T) {
-	got := buildTimestampedName("Overpass Parks TOKYO!!", time.Date(2026, 2, 15, 6, 33, 13, 0, time.UTC))
-	assertUUIDv7WorkName(t, got)
 }
 
 func TestGenerateWorkIDv7(t *testing.T) {

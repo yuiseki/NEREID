@@ -580,46 +580,6 @@ func TestApplyGrantToJobOverridesQueueRuntimeResourcesAndEnv(t *testing.T) {
 	}
 }
 
-func TestAllowedWorksForGrantMaxUsesSelectsEarliestByCreationTimestamp(t *testing.T) {
-	makeWork := func(name string, ts time.Time, grant string) *unstructured.Unstructured {
-		w := &unstructured.Unstructured{Object: map[string]interface{}{
-			"apiVersion": "nereid.yuiseki.net/v1alpha1",
-			"kind":       "Work",
-			"metadata": map[string]interface{}{
-				"name":      name,
-				"namespace": "nereid",
-			},
-			"spec": map[string]interface{}{
-				"kind":  "overpassql.map.v1",
-				"title": "x",
-			},
-		}}
-		w.SetCreationTimestamp(metav1.Time{Time: ts})
-		if grant != "" {
-			_ = unstructured.SetNestedField(w.Object, map[string]interface{}{"name": grant}, "spec", "grantRef")
-		}
-		return w
-	}
-
-	base := time.Date(2026, 2, 15, 7, 0, 0, 0, time.UTC)
-	w1 := makeWork("w1", base.Add(1*time.Minute), "g1")
-	w2 := makeWork("w2", base.Add(2*time.Minute), "g1")
-	w3 := makeWork("w3", base.Add(3*time.Minute), "g1")
-	wOther := makeWork("w-other", base.Add(4*time.Minute), "g2")
-
-	all := []*unstructured.Unstructured{w3, wOther, w1, w2}
-	allowed := allowedWorkNamesForGrantMaxUses(all, "g1", 2)
-	if !allowed["w1"] || !allowed["w2"] {
-		t.Fatalf("expected w1/w2 allowed, got=%v", allowed)
-	}
-	if allowed["w3"] {
-		t.Fatalf("expected w3 denied, got=%v", allowed)
-	}
-	if allowed["w-other"] {
-		t.Fatalf("expected w-other ignored, got=%v", allowed)
-	}
-}
-
 func TestExtractViewportDefaultsAndOverrides(t *testing.T) {
 	workDefault := &unstructured.Unstructured{Object: map[string]interface{}{
 		"spec": map[string]interface{}{},

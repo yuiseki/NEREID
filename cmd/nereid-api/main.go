@@ -881,10 +881,6 @@ func splitInstructionLines(text string) []string {
 	return out
 }
 
-func plannerAPIKey() string {
-	return plannerCredentialsFromEnv().key
-}
-
 func plannerCredentialsFromEnv() plannerCredentials {
 	if v := strings.TrimSpace(os.Getenv("NEREID_OPENAI_API_KEY")); v != "" {
 		return plannerCredentials{key: v, provider: plannerProviderOpenAI}

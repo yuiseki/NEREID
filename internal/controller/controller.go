@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -1629,54 +1628,6 @@ func (c *Controller) validateGrantForWork(ctx context.Context, work *unstructure
 	}
 
 	return nil
-}
-
-func allowedWorkNamesForGrantMaxUses(works []*unstructured.Unstructured, grantName string, maxUses int64) map[string]bool {
-	out := map[string]bool{}
-	grantName = strings.TrimSpace(grantName)
-	if grantName == "" {
-		return out
-	}
-
-	if maxUses <= 0 {
-		for _, w := range works {
-			if workGrantRefName(w) == grantName {
-				out[w.GetName()] = true
-			}
-		}
-		return out
-	}
-
-	candidates := make([]*unstructured.Unstructured, 0, len(works))
-	for _, w := range works {
-		if workGrantRefName(w) == grantName {
-			candidates = append(candidates, w)
-		}
-	}
-
-	sort.SliceStable(candidates, func(i, j int) bool {
-		ti := candidates[i].GetCreationTimestamp().Time
-		tj := candidates[j].GetCreationTimestamp().Time
-		if !ti.Equal(tj) {
-			return ti.Before(tj)
-		}
-		return candidates[i].GetName() < candidates[j].GetName()
-	})
-
-	for i := range candidates {
-		if int64(i) < maxUses {
-			out[candidates[i].GetName()] = true
-		}
-	}
-	return out
-}
-
-func workGrantRefName(work *unstructured.Unstructured) string {
-	if work == nil {
-		return ""
-	}
-	name, _, _ := unstructured.NestedString(work.Object, "spec", "grantRef", "name")
-	return strings.TrimSpace(name)
 }
 
 func workUserPrompt(work *unstructured.Unstructured) string {

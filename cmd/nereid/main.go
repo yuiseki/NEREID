@@ -259,14 +259,6 @@ func splitGrantFlag(args []string) (string, []string, error) {
 	return grant, out, nil
 }
 
-func buildTimestampedName(base string, now time.Time) string {
-	workName, err := generateWorkIDv7()
-	if err != nil {
-		return "work"
-	}
-	return workName
-}
-
 func sanitizeName(v string) string {
 	v = strings.ToLower(v)
 	var b strings.Builder
