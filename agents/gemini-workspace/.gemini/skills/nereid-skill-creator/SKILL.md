@@ -1,6 +1,6 @@
 ---
-name: skill-creator
-description: Create or update Gemini CLI skills. Use when asked to design, improve, rename, or maintain SKILL.md-based expertise, including extracting reusable session lessons into ./specials/skills.
+name: nereid-skill-creator
+description: Create or update NEREID workspace Gemini CLI skills. Use when asked to design, improve, rename, or maintain SKILL.md-based expertise, including extracting reusable session lessons into ./specials/skills.
 ---
 # Skill Creator
 

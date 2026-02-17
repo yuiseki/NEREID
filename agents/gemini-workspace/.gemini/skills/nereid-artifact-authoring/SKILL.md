@@ -35,6 +35,7 @@ Create HTML artifacts that can be opened immediately from static hosting.
 - For MapLibre base maps, use one of:
   - https://tile.yuiseki.net/styles/osm-bright/style.json
   - https://tile.yuiseki.net/styles/osm-fiord/style.json
+- `tile.yuiseki.net` styles do not need access tokens; do not include token setup or placeholder token strings.
 - If Overpass API is used, call one of:
   - https://overpass.yuiseki.net/api/interpreter?data=<url-encoded-overpass-ql>
   - curl -sS -G --data-urlencode "data=<overpass-ql>" https://overpass.yuiseki.net/api/interpreter

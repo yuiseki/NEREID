@@ -15,6 +15,8 @@ description: Use pinned MapLibre GL JS/CSS CDN assets when generating HTML maps.
 1. When creating MapLibre-based HTML, include both pinned JS and CSS URLs above.
 2. Do not switch versions unless the user explicitly requests a different version.
 3. Keep script/style tags explicit in `index.html` so runtime dependencies are auditable.
+4. Do not add or request any MapLibre/Mapbox access token for `tile.yuiseki.net` styles.
+5. Never emit placeholders such as `YOUR_MAPLIBRE_GL_ACCESS_TOKEN` or `YOUR_MAPTILER_KEY`.
 
 ## Example snippet
 ```html

@@ -61,6 +61,10 @@ if grep -Eqi 'data-nereid-bootstrap="1"|Gemini CLI is preparing artifact output|
   fail_validation "index.html is still bootstrap placeholder. Replace it with final output."
 fi
 
+if grep -Eqi 'YOUR_MAPLIBRE_GL_ACCESS_TOKEN|YOUR_MAPTILER_KEY|mapboxgl\.accessToken|maptiler\.com/.*key=' "${INDEX_FILE}"; then
+  fail_validation "index.html contains MapLibre token placeholders or token setup. tile.yuiseki.net styles must be used without access tokens."
+fi
+
 if [ -f "${PROMPT_FILE}" ] && grep -Eqi '地図|マップ|表示|show|display|render|visualize' "${PROMPT_FILE}"; then
   has_map=false
   if grep -Eqi 'maplibre|leaflet|openlayers|deck\.gl|<canvas|<svg' "${INDEX_FILE}"; then

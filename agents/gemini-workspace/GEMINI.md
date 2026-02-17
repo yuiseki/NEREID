@@ -20,4 +20,5 @@
 - Persist extracted session skills under ./specials/skills/.
 - Commands available in PATH via npx wrappers: osmable, http-server, playwright-cli.
 - There is no tool named `osmable_v1`; run `osmable` through the shell command tool.
+- For `tile.yuiseki.net` MapLibre styles, do not add access token setup or placeholder token strings.
 - Playwright browser binaries may be missing; install only when browser automation is required.

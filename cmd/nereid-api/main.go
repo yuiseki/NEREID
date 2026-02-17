@@ -528,6 +528,8 @@ tee "${OUT_TEXT_RAW}" < "${OUT_TEXT_PIPE}" | sed -u \
   -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
   -e '/^npm[[:space:]]\+notice/d' \
   -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
+  -e '/^Skill ".*" from ".*" is overriding the built-in skill\.$/d' \
+  -e '/is overriding the built-in skill/d' \
   -e '/^WARNING: The following project-level hooks have been detected in this workspace:/,/remove them/d' \
   -e '/project-level hooks have been detected in this workspace/d' \
   -e '/If you did not configure these hooks or do not trust this project/d' \
@@ -554,6 +556,8 @@ if ! sed \
   -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
   -e '/^npm[[:space:]]\+notice/d' \
   -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
+  -e '/^Skill ".*" from ".*" is overriding the built-in skill\.$/d' \
+  -e '/is overriding the built-in skill/d' \
   -e '/^WARNING: The following project-level hooks have been detected in this workspace:/,/remove them/d' \
   -e '/project-level hooks have been detected in this workspace/d' \
   -e '/If you did not configure these hooks or do not trust this project/d' \
