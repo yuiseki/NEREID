@@ -1,5 +1,5 @@
 ---
-name: maplibre-style-v1
+name: maplibre-style
 description: Decide when to author a MapLibre Style Spec and how to structure layers.
 ---
 # MapLibre Style Authoring

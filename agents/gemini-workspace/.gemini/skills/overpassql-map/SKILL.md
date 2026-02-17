@@ -1,5 +1,5 @@
 ---
-name: overpassql-map-v1
+name: overpassql-map
 description: Decide when to use Overpass QL and how to design robust map data queries.
 ---
 # Overpass QL Strategy

@@ -1,5 +1,5 @@
 ---
-name: osmable-v1
+name: osmable
 description: Use osmable CLI for deterministic OSM geocoding, AOI, POI, and routing workflows.
 ---
 # osmable Workflow

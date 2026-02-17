@@ -1,5 +1,5 @@
 ---
-name: maplibre-cdn-v1
+name: maplibre-cdn
 description: Use pinned MapLibre GL JS/CSS CDN assets when generating HTML maps. Trigger when writing or updating index.html that loads MapLibre.
 ---
 # MapLibre CDN Pinning

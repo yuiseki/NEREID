@@ -1,5 +1,5 @@
 ---
-name: gdal-rastertile-v1
+name: gdal-rastertile
 description: Decide when raster tiling is needed and how to structure GDAL-based pipelines.
 ---
 # GDAL Raster Pipeline

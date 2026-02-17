@@ -203,11 +203,11 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 		"laz.3dtiles.v1",
 	}
 	kindSkills := map[string]string{
-		"overpassql.map.v1":  "overpassql-map-v1",
-		"maplibre.style.v1":  "maplibre-style-v1",
-		"duckdb.map.v1":      "duckdb-map-v1",
-		"gdal.rastertile.v1": "gdal-rastertile-v1",
-		"laz.3dtiles.v1":     "laz-3dtiles-v1",
+		"overpassql.map.v1":  "overpassql-map",
+		"maplibre.style.v1":  "maplibre-style",
+		"duckdb.map.v1":      "duckdb-map",
+		"gdal.rastertile.v1": "gdal-rastertile",
+		"laz.3dtiles.v1":     "laz-3dtiles",
 	}
 
 	for _, legacyKind := range kinds {

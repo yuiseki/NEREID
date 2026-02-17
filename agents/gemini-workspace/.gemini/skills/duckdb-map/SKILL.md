@@ -1,5 +1,5 @@
 ---
-name: duckdb-map-v1
+name: duckdb-map
 description: Decide when DuckDB is appropriate and how to prepare query-to-map workflows.
 ---
 # DuckDB Map Workflow

@@ -1,5 +1,5 @@
 ---
-name: laz-3dtiles-v1
+name: laz-3dtiles
 description: Decide when LAZ to 3DTiles flow is needed and how to structure 3D pointcloud outputs.
 ---
 # LAZ to 3DTiles Pipeline

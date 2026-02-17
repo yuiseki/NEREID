@@ -588,15 +588,15 @@ exit "${status}"
 func legacyKindSkillName(kind string) (string, error) {
 	switch kind {
 	case "overpassql.map.v1":
-		return "overpassql-map-v1", nil
+		return "overpassql-map", nil
 	case "maplibre.style.v1":
-		return "maplibre-style-v1", nil
+		return "maplibre-style", nil
 	case "duckdb.map.v1":
-		return "duckdb-map-v1", nil
+		return "duckdb-map", nil
 	case "gdal.rastertile.v1":
-		return "gdal-rastertile-v1", nil
+		return "gdal-rastertile", nil
 	case "laz.3dtiles.v1":
-		return "laz-3dtiles-v1", nil
+		return "laz-3dtiles", nil
 	default:
 		return "", fmt.Errorf("unsupported legacy kind for bridge: %q", kind)
 	}
