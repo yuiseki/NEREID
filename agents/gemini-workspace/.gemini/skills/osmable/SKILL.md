@@ -44,13 +44,74 @@ description: Use osmable CLI for deterministic OSM workflows (geocode, reverse, 
 
 ## Map handoff constraints
 - `osmable` does retrieval; map visualization is authored in `index.html`.
+- **Always overwrite `index.html` entirely** using `cat > index.html << 'EOF' ... EOF`. Do NOT use `replace` / partial edits.
 - For MapLibre output, use pinned CDN assets and only these base style URLs:
   - `https://tile.yuiseki.net/styles/osm-bright/style.json`
   - `https://tile.yuiseki.net/styles/osm-fiord/style.json`
 - Do not use `https://tile.yuiseki.net/style.json`.
 - Do not add token placeholders such as `YOUR_MAPLIBRE_GL_ACCESS_TOKEN`.
 
+## Complete index.html template (park map)
+
+After `osmable poi fetch` produces `parks.geojson`, write `index.html` as a single shell command:
+
+```bash
+cat > index.html << 'EOF'
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Parks Map</title>
+  <link href="https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.css" rel="stylesheet"/>
+  <script src="https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.js"></script>
+  <style>html,body{margin:0;padding:0;height:100%}#map{width:100%;height:100%}</style>
+</head>
+<body>
+  <div id="map"></div>
+  <script>
+    const map = new maplibregl.Map({
+      container: 'map',
+      style: 'https://tile.yuiseki.net/styles/osm-bright/style.json',
+      center: [139.78, 35.71],
+      zoom: 14
+    });
+    map.on('load', async () => {
+      const res = await fetch('./parks.geojson');
+      const geojson = await res.json();
+      map.addSource('parks', { type: 'geojson', data: geojson });
+      map.addLayer({
+        id: 'parks-fill',
+        type: 'fill',
+        source: 'parks',
+        paint: { 'fill-color': '#2d6a4f', 'fill-opacity': 0.4 }
+      });
+      map.addLayer({
+        id: 'parks-outline',
+        type: 'line',
+        source: 'parks',
+        paint: { 'line-color': '#1b4332', 'line-width': 1.5 }
+      });
+      const bounds = new maplibregl.LngLatBounds();
+      geojson.features.forEach(f => {
+        const coords = f.geometry.type === 'Point' ? [f.geometry.coordinates]
+          : f.geometry.type === 'Polygon' ? f.geometry.coordinates[0]
+          : f.geometry.type === 'MultiPolygon' ? f.geometry.coordinates.flat(2)
+          : f.geometry.coordinates?.flat?.(2) || [];
+        coords.forEach(c => { if (c && c.length >= 2) bounds.extend(c); });
+      });
+      if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 40 });
+    });
+  </script>
+</body>
+</html>
+EOF
+```
+
+Adjust `center`, `zoom`, and `<title>` to match the user's target area. The template satisfies all validation checks (map markers, no bootstrap placeholder, no token placeholders).
+
 ## Failure and fallback
 - If `osmable` fails, capture stderr/exit code in artifacts for debugging.
 - Run `osmable doctor` when endpoint health is uncertain.
 - Fall back to direct curl/browser fetch only when `osmable` cannot satisfy the task.
+

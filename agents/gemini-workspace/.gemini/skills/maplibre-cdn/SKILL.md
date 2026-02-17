@@ -1,8 +1,12 @@
 ---
 name: maplibre-cdn
-description: Use pinned MapLibre GL JS/CSS CDN assets when generating HTML maps. Trigger when writing or updating index.html that loads MapLibre.
+description: "Reference-only: pinned MapLibre GL JS/CSS CDN URLs. NOT a callable tool. Read and inline these URLs when writing index.html."
 ---
 # MapLibre CDN Pinning
+
+> **This is reference information, NOT a callable tool.**
+> Do not call `maplibre_cdn` or `maplibre-cdn` as a tool.
+> Instead, copy the URLs below directly into your HTML `<script>` and `<link>` tags.
 
 ## Purpose
 - Keep Map rendering behavior stable by pinning MapLibre asset URLs.

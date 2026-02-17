@@ -9,8 +9,8 @@ Create HTML artifacts that can be opened immediately from static hosting.
 
 ## Required behavior
 - You MUST create or update ./index.html in the current directory.
-- First action: write a minimal ./index.html (for example, an <h1>Hello, world</h1> page).
-- After bootstrap, replace or extend ./index.html to satisfy the current instruction.
+- A bootstrap placeholder `index.html` already exists (containing `data-nereid-bootstrap="1"`). **You MUST overwrite it entirely** with the final artifact HTML.
+- **Do NOT use `replace` / partial edits on `index.html`.** Always write the complete file using `cat > index.html << 'EOF' ... EOF` or equivalent full-file write.
 - Use shell commands to write files; do not finish with explanation-only output.
 - Finish only after files are persisted to disk.
 - NEVER read, request, print, or persist environment variable values.
