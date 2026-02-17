@@ -260,7 +260,7 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"legacy-work-spec.json",
 				"GEMINI_MD_FILE",
 				"@google/gemini-cli",
-				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}\"",
+				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-pro}}\"",
 				"--model \"${GEMINI_CLI_MODEL}\"",
 				"WARNING: The following project-level hooks have been detected in this workspace:",
 				"legacy-kind-prompt.txt",
@@ -268,8 +268,8 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 				"TEMPLATE_ROOT=\"${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}\"",
 				"Gemini workspace template missing: ${TEMPLATE_ROOT}/.gemini",
 				"Gemini workspace template missing: ${TEMPLATE_ROOT}/GEMINI.md",
-				"cp -R \"${TEMPLATE_ROOT}/.gemini/.\" \"${OUT_DIR}/.gemini/\"",
-				"cp \"${TEMPLATE_ROOT}/GEMINI.md\" \"${GEMINI_MD_FILE}\"",
+				"cp -a \"${TEMPLATE_ROOT}/.\" \"${OUT_DIR}/\"",
+				"rm -rf \"${OUT_DIR}/node_modules\" \"${OUT_DIR}/dist\"",
 			} {
 				if !strings.Contains(embedded, needle) {
 					t.Fatalf("embedded script missing %q\nscript:\n%s", needle, embedded)
@@ -281,6 +281,9 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 			}
 			if !strings.Contains(prompt, "especially "+kindSkill+".") {
 				t.Fatalf("prompt missing skill activation hint %q\nprompt:\n%s", kindSkill, prompt)
+			}
+			if !strings.Contains(prompt, "make build") {
+				t.Fatalf("prompt missing make build reference\nprompt:\n%s", prompt)
 			}
 			for _, needle := range []string{
 				"OSMABLE_SKILL_B64=",

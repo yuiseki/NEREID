@@ -443,7 +443,7 @@ func plannerModel() string {
 		if v := strings.TrimSpace(os.Getenv("GEMINI_MODEL")); v != "" {
 			return v
 		}
-		return "gemini-2.0-flash"
+		return "gemini-2.5-pro"
 	}
 	return "gpt-4o-mini"
 }

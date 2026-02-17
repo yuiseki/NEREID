@@ -352,8 +352,8 @@ func TestPlannerModelDefaultsToGeminiWhenGeminiKeySet(t *testing.T) {
 	t.Setenv("NEREID_GEMINI_API_KEY", "")
 	t.Setenv("GEMINI_API_KEY", "gemini-key")
 
-	if got := plannerModel(); got != "gemini-2.0-flash" {
-		t.Fatalf("plannerModel() got=%q want=%q", got, "gemini-2.0-flash")
+	if got := plannerModel(); got != "gemini-2.5-pro" {
+		t.Fatalf("plannerModel() got=%q want=%q", got, "gemini-2.5-pro")
 	}
 }
 

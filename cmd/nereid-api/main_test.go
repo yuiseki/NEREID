@@ -57,7 +57,7 @@ func TestPlannerModelDefaultsByProvider(t *testing.T) {
 	if got := plannerModel(plannerProviderOpenAI); got != "gpt-4o-mini" {
 		t.Fatalf("plannerModel(openai) got=%q", got)
 	}
-	if got := plannerModel(plannerProviderGemini); got != "gemini-2.0-flash" {
+	if got := plannerModel(plannerProviderGemini); got != "gemini-2.5-pro" {
 		t.Fatalf("plannerModel(gemini) got=%q", got)
 	}
 }
@@ -174,10 +174,10 @@ func TestGeminiAgentScriptUsesWorkspaceTemplate(t *testing.T) {
 		`TEMPLATE_ROOT="${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}"`,
 		`Gemini workspace template missing: ${TEMPLATE_ROOT}/.gemini`,
 		`Gemini workspace template missing: ${TEMPLATE_ROOT}/GEMINI.md`,
-		`cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/"`,
-		`cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}"`,
+		`cp -a "${TEMPLATE_ROOT}/." "${OUT_DIR}/"`,
+		`rm -rf "${OUT_DIR}/node_modules" "${OUT_DIR}/dist"`,
 		`chmod +x "${OUT_DIR}/.gemini/hooks/"*.sh 2>/dev/null || true`,
-		`GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}"`,
+		`GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-pro}}"`,
 		`--model "${GEMINI_CLI_MODEL}"`,
 		`YOLO mode is enabled\. All tool calls will be automatically approved\.`,
 		`WARNING: The following project-level hooks have been detected in this workspace:`,

@@ -24,7 +24,7 @@
   - Gemini output is now streamed into `agent.log` while command is executing.
   - Bootstrap `index.html` now links/polls `agent.log` in real time.
 - [x] Added Gemini runtime fail-fast controls:
-  - default model switched to `gemini-2.0-flash`
+  - default model switched to `gemini-2.5-pro`
   - default CLI timeout set to `180s` (`NEREID_GEMINI_TIMEOUT_SECONDS` override)
 - [x] Strengthened `validate-index-html` hook:
   - reject bootstrap placeholder pages

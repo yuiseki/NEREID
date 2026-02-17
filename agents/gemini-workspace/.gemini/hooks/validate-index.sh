@@ -57,7 +57,7 @@ if ! grep -Eqi '<!doctype html|<html[[:space:]>]|<body[[:space:]>]|<main[[:space
   fail_validation "index.html does not look like renderable HTML."
 fi
 
-if grep -Eqi 'data-nereid-bootstrap="1"|Gemini CLI is preparing artifact output|<h1>[[:space:]]*Hello,[[:space:]]*world[[:space:]]*</h1>' "${INDEX_FILE}"; then
+if grep -Eqi 'data-nereid-bootstrap="1"|Gemini CLI is preparing artifact output' "${INDEX_FILE}"; then
   fail_validation "index.html is still bootstrap placeholder. Replace it with final output."
 fi
 
@@ -70,7 +70,10 @@ if [ -f "${PROMPT_FILE}" ] && grep -Eqi '地図|マップ|表示|show|display|re
   if grep -Eqi 'maplibre|leaflet|openlayers|deck\.gl|<canvas|<svg' "${INDEX_FILE}"; then
     has_map=true
   fi
-  if grep -Eqi "id=['\"]map['\"]|class=['\"][^'\"]*map[^'\"]*['\"]" "${INDEX_FILE}"; then
+  if grep -Eqi "id=['\"](map|root)['\"]|class=['\"][^'\"]*map[^'\"]*['\"]" "${INDEX_FILE}"; then
+    has_map=true
+  fi
+  if grep -Eqi '<script[[:space:]]+type=["'\'']module["'\'']' "${INDEX_FILE}"; then
     has_map=true
   fi
   if [ "${has_map}" != "true" ]; then

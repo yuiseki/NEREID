@@ -1,49 +1,74 @@
 ---
 name: nereid-artifact-authoring
-description: Create static-hostable HTML artifacts in NEREID workspace.
+description: Create map artifacts in NEREID Vite+React workspace by editing src/App.tsx.
 ---
-# NEREID Artifact Authoring
+# NEREID Artifact Authoring (Vite + React)
 
 ## Purpose
-Create HTML artifacts that can be opened immediately from static hosting.
+Create interactive map artifacts using the Vite + React + TypeScript + react-map-gl project.
+
+## Project structure
+```
+gemini-workspace/
+├── index.html          ← Vite entry (do not edit directly for content)
+├── src/
+│   ├── main.tsx        ← React entry point
+│   ├── App.tsx         ← **Main editing target**
+│   ├── App.css         ← Styles
+│   ├── vite-env.d.ts   ← Vite types
+│   ├── hooks/
+│   │   └── useFitBounds.ts  ← turf.bbox fitBounds hook
+│   └── lib/
+│       └── overpass.ts      ← osmtogeojson + swr fetcher
+├── public/
+│   └── styles/         ← Map style JSON files
+│       ├── osm_vector.json
+│       ├── osm_raster.json
+│       └── osm_pmtiles.json
+├── scripts/
+│   ├── setup.sh
+│   └── fetch_geojson.py
+├── Makefile
+└── package.json
+```
+
+## Available libraries
+| Package | Use |
+|---|---|
+| `react-map-gl` v8 | React map components (`<Map>`, `<Source>`, `<Layer>`, `<Marker>`) |
+| `maplibre-gl` v5 | Map rendering engine |
+| `pmtiles` | PMTiles protocol for MapLibre |
+| `osmtogeojson` | Convert Overpass JSON → GeoJSON |
+| `swr` | React data fetching hooks |
+| `@turf/turf` | Geospatial analysis (bbox, buffer, centroid, etc.) |
 
 ## Required behavior
-- You MUST create or update ./index.html in the current directory.
-- A bootstrap placeholder `index.html` already exists (containing `data-nereid-bootstrap="1"`). **You MUST overwrite it entirely** with the final artifact HTML.
-- **Do NOT use `replace` / partial edits on `index.html`.** Always write the complete file using `cat > index.html << 'EOF' ... EOF` or equivalent full-file write.
-- Use shell commands to write files; do not finish with explanation-only output.
-- Finish only after files are persisted to disk.
+- **Primary edit target**: `src/App.tsx` — modify this file to change map behavior, layers, and data.
+- **Add components**: Create under `src/` as `.tsx` files and import from `App.tsx`.
+- **Static data**: Place GeoJSON, JSON files in `public/` directory.
+- **Data fetching**: Always use relative paths (e.g. `./parks.geojson`) to fetch data from `public/`. DO NOT use absolute paths (`/parks.geojson`).
+- **Build**: Run `make build` — builds and copies entire `dist/` contents to project root.
+- Always pass `mapLib={maplibregl}` prop to `<Map>`.
+- Initialize PMTiles protocol before using `osm_pmtiles` style.
+- Do NOT hand-write `./index.html` from scratch.
 - NEVER read, request, print, or persist environment variable values.
-- NEVER output secrets such as API keys into logs, text responses, HTML, JavaScript, or any generated file.
-- Gemini web_fetch tool is allowed for normal HTML pages.
-- For OSM/Nominatim workflows, use `osmable ...` first for agent-side retrieval, validation, and deterministic summaries.
-- For structured JSON APIs (for example Overpass/Nominatim), DO NOT use Gemini web_fetch. Use shell curl or browser-side fetch when `osmable` cannot satisfy the task.
-- Never pass raw Overpass QL in a URL query string such as .../api/interpreter?data=[out:json]....
-- For Overpass requests, always URL-encode data (for example encodeURIComponent(query)) or use curl -G --data-urlencode.
-- If a structured API call fails, retry with `osmable` or curl/browser fetch; do not retry with web_fetch.
-
-## Multi-line input handling
-- If the user prompt has multiple bullet or line instructions, treat each line independently.
-- For multiple lines, create one HTML file per line (for example task-01.html, task-02.html).
-- Keep ./index.html as an entry page linking those generated task pages.
+- For Overpass, always URL-encode data or use `src/lib/overpass.ts` utilities.
 
 ## Mapping defaults
-- For map requests, produce an interactive HTML map (MapLibre, Leaflet, or Cesium).
-- If MapLibre is used, load pinned assets:
-  - https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.js
-  - https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.css
-- For MapLibre base maps, use one of:
-  - https://tile.yuiseki.net/styles/osm-bright/style.json
-  - https://tile.yuiseki.net/styles/osm-fiord/style.json
-- `tile.yuiseki.net` styles do not need access tokens; do not include token setup or placeholder token strings.
-- If Overpass API is used, call one of:
-  - https://overpass.yuiseki.net/api/interpreter?data=<url-encoded-overpass-ql>
-  - curl -sS -G --data-urlencode "data=<overpass-ql>" https://overpass.yuiseki.net/api/interpreter
-- If Nominatim API is used, use:
-  - https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>
-- Do not append trailing punctuation to API URLs.
-- In final `index.html`, prefer browser-side fetch for map data retrieval.
-- If remote APIs fail, still keep index.html viewable and show a concise in-page error message.
+- Default style: `https://tile.yuiseki.net/styles/osm-bright/style.json`
+- Alternative: `https://tile.yuiseki.net/styles/osm-fiord/style.json`
+- Local styles: `./styles/osm_vector.json`, `./styles/osm_raster.json`, `./styles/osm_pmtiles.json`
+- `tile.yuiseki.net` styles need NO access tokens.
+
+## Build workflow
+```bash
+make install   # npm install
+make dev       # Vite dev server
+make build     # Production build → ./index.html
+make typecheck # tsc --noEmit
+```
 
 ## Output quality
-- Keep generated artifacts self-contained and directly viewable from static hosting.
+- Use TypeScript types properly.
+- Keep components focused and reusable.
+- After editing, run `make build` to ensure the artifact passes validation.

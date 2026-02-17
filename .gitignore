@@ -1,5 +1,6 @@
 /bin/
 /tmp/
+node_modules/
 *.out
 .playwright-cli/
 .env

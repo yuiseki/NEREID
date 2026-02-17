@@ -471,9 +471,8 @@ if [ ! -f "${TEMPLATE_ROOT}/GEMINI.md" ]; then
   exit 2
 fi
 
-mkdir -p "${OUT_DIR}/.gemini"
-cp -R "${TEMPLATE_ROOT}/.gemini/." "${OUT_DIR}/.gemini/"
-cp "${TEMPLATE_ROOT}/GEMINI.md" "${GEMINI_MD_FILE}"
+cp -a "${TEMPLATE_ROOT}/." "${OUT_DIR}/"
+rm -rf "${OUT_DIR}/node_modules" "${OUT_DIR}/dist"
 chmod +x "${OUT_DIR}/.gemini/hooks/"*.sh 2>/dev/null || true
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
@@ -520,7 +519,7 @@ export npm_config_update_notifier=false
 export npm_config_fund=false
 export npm_config_audit=false
 export NO_UPDATE_NOTIFIER=1
-GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.0-flash}}"
+GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-pro}}"
 GEMINI_TIMEOUT_SECONDS="${NEREID_GEMINI_TIMEOUT_SECONDS:-180}"
 rm -f "${OUT_TEXT_PIPE}" "${OUT_TEXT_RAW}"
 mkfifo "${OUT_TEXT_PIPE}"
@@ -986,7 +985,7 @@ func plannerModel(provider string) string {
 		if v := strings.TrimSpace(os.Getenv("GEMINI_MODEL")); v != "" {
 			return v
 		}
-		return "gemini-2.0-flash"
+		return "gemini-2.5-pro"
 	}
 
 	return "gpt-4o-mini"

@@ -1,8 +1,8 @@
 ---
 name: overpassql-map
-description: Decide when to use Overpass QL and how to design robust map data queries.
+description: Decide when to use Overpass QL and how to design robust map data queries for the Vite+React workspace.
 ---
-# Overpass QL Strategy
+# Overpass QL Strategy (Vite + React)
 
 ## When to use
 - User asks for specific real-world objects from OpenStreetMap (parks, convenience stores, stations, roads, rivers, boundaries).
@@ -16,19 +16,31 @@ description: Decide when to use Overpass QL and how to design robust map data qu
 ## Recommended workflow
 1. Resolve target area from user instruction (city/ward/region).
 2. Build minimal Overpass QL with explicit tag filters.
-3. Prefer osmable poi count/fetch for deterministic OSM retrieval.
+3. Prefer `osmable poi count/fetch` for deterministic OSM retrieval.
 4. For parks, use `leisure=park` as the primary tag (do not start with `amenity=park`).
 5. Keep the original area string from the user prompt when calling osmable:
    - good: `osmable poi count --tag leisure=park --within "東京都台東区" --format json`
    - avoid replacing with transliterated English area names unless geocode confirms.
-6. If count is zero unexpectedly, retry once with `osmable aoi resolve "<same area>" --format geojson` and then rerun the same `leisure=park` query.
+6. If count is zero unexpectedly, retry once with `osmable aoi resolve "<same area>" --format geojson` and then rerun.
 7. Use endpoint https://overpass.yuiseki.net/api/interpreter with URL-encoded data parameter only when osmable cannot complete.
 8. Keep timeout and output size reasonable.
 9. Agent-side retrieval should remain `osmable`-first for deterministic execution logs and retries.
-10. For final artifact implementation, prefer browser-side fetch in `index.html` for map data retrieval.
-11. Convert response to map-friendly geometry and render in index.html.
+10. Save fetched data to `public/` directory for the Vite React app to load.
+
+## React integration
+After fetching data to `public/data.geojson`:
+
+```tsx
+import { Source, Layer } from "react-map-gl/maplibre";
+
+// In your Map component:
+<Source id="overpass-data" type="geojson" data="/data.geojson">
+  <Layer id="data-layer" type="fill" paint={{ "fill-color": "#3388ff", "fill-opacity": 0.5 }} />
+</Source>
+```
 
 ## Output expectations
-- Store raw response for debugging.
-- Show clear map visualization and concise summary in-page.
-- Never fabricate dummy/placeholder parks to satisfy validation.
+- Store raw response data in `public/` for debugging and rendering.
+- Update `src/App.tsx` to visualize the data.
+- Run `make build` to generate deployable artifact.
+- Never fabricate dummy/placeholder data to satisfy validation.

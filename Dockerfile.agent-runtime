@@ -12,13 +12,15 @@ RUN apt-get update \
     curl \
     wget \
     git \
+    make \
     procps \
+    python3 \
   && rm -rf /var/lib/apt/lists/*
 
 # Install CLI tools used by generated Gemini job scripts.
 RUN npm install -g --omit=dev --no-audit --no-fund \
     http-server \
-    playwright-cli \
+    @playwright/cli@latest \
     playwright
 
 COPY agents/osmable-patches /opt/nereid/osmable-patches
@@ -34,12 +36,16 @@ RUN git clone --depth 1 https://github.com/yuiseki/osmable /tmp/osmable \
 # Optional: preinstall Playwright Chromium at image build time.
 ARG INSTALL_PLAYWRIGHT_CHROMIUM=1
 RUN if [ "${INSTALL_PLAYWRIGHT_CHROMIUM}" = "1" ]; then \
-      npx -y playwright install chromium; \
+      npx -y playwright install --with-deps chromium; \
     fi
 
 # Keep frequently changed workspace templates late to avoid busting heavy caches.
 COPY agents/gemini-workspace /opt/nereid/gemini-workspace
+# Remove stale build artifacts so fresh workspaces start clean.
+RUN rm -rf /opt/nereid/gemini-workspace/node_modules \
+           /opt/nereid/gemini-workspace/dist
 ENV NEREID_GEMINI_TEMPLATE_ROOT=/opt/nereid/gemini-workspace
 
 WORKDIR /work
 CMD ["node", "--version"]
+

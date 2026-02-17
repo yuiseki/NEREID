@@ -40,7 +40,7 @@ Planner-related environment variables:
 - `NEREID_GEMINI_API_KEY` (or `GEMINI_API_KEY`)
 - `NEREID_LLM_BASE_URL` (default: OpenAI `https://api.openai.com/v1`, Gemini `https://generativelanguage.googleapis.com/v1beta/openai`)
 - `NEREID_LLM_MODEL` (optional override for any provider)
-- `NEREID_GEMINI_MODEL` / `GEMINI_MODEL` (optional Gemini-specific model override; default `gemini-2.0-flash`)
+- `NEREID_GEMINI_MODEL` / `GEMINI_MODEL` (optional Gemini-specific model override; default `gemini-2.5-pro`)
 
 Build a local binary:
 
