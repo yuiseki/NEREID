@@ -12,6 +12,9 @@ description: Decide when to author a MapLibre Style Spec and how to structure la
 - Style Spec is JSON with version, sources, layers, glyphs/sprites.
 - Layer order controls rendering priority.
 - Filters and paint/layout properties should be explicit and readable.
+- When rendering MapLibre in HTML, pin assets to:
+  - https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.js
+  - https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.css
 
 ## Recommended workflow
 1. Choose base style source (tile.yuiseki.net styles when possible).

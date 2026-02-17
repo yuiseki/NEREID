@@ -29,6 +29,9 @@ Create HTML artifacts that can be opened immediately from static hosting.
 
 ## Mapping defaults
 - For map requests, produce an interactive HTML map (MapLibre, Leaflet, or Cesium).
+- If MapLibre is used, load pinned assets:
+  - https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.js
+  - https://unpkg.com/maplibre-gl@5.18.0/dist/maplibre-gl.css
 - For MapLibre base maps, use one of:
   - https://tile.yuiseki.net/styles/osm-bright/style.json
   - https://tile.yuiseki.net/styles/osm-fiord/style.json
