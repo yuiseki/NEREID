@@ -102,7 +102,7 @@ Embed view:
 - `https://nereid.yuiseki.net/embed?work=<work-name>` (legacy-compatible)
 - or `https://nereid.yuiseki.net/embed?artifact=<artifact-url>`
 
-`/works/<work-name>` and `/embed` show `user-input.txt` / `dialogue.txt` / `agent.log` and an iframe preview of the artifact.
+`/works/<work-name>` and `/embed` show `user-input.txt` / `agent.log` and an iframe preview of the artifact.
 
 ```bash
 WORK_NAME=$(nereid submit examples/works/overpassql.yaml -n nereid -o name | cut -d/ -f2)

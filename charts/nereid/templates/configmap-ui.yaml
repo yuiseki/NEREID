@@ -512,8 +512,6 @@ data:
             <aside class="embed-log">
               <h3>User Input</h3>
               <pre id="embed-user">Waiting...</pre>
-              <h3>Agent Dialogue</h3>
-              <pre id="embed-dialogue">Waiting...</pre>
               <h3>Agent Log</h3>
               <pre id="embed-agent">Waiting...</pre>
               <div class="embed-followup" id="embed-followup">
@@ -575,7 +573,6 @@ data:
           const embedOpenEl = document.getElementById("embed-open");
           const embedMetaEl = document.getElementById("embed-meta");
           const embedUserEl = document.getElementById("embed-user");
-          const embedDialogueEl = document.getElementById("embed-dialogue");
           const embedAgentEl = document.getElementById("embed-agent");
           const embedStageEl = document.getElementById("embed-status-stage");
           const embedPhaseChipEl = document.getElementById("embed-phase-chip");
@@ -833,7 +830,6 @@ data:
             if (!artifactUrl) {
               embedMetaEl.textContent = "Use ?work=<work-name>.";
               embedUserEl.textContent = "";
-              embedDialogueEl.textContent = "";
               embedAgentEl.textContent = "";
               if (embedFollowupEl) embedFollowupEl.style.display = "none";
               if (embedOpenEl) embedOpenEl.style.display = "none";
@@ -866,10 +862,8 @@ data:
                 }
                 const contextParts = [];
                 const userText = readEmbedText(embedUserEl);
-                const dialogueText = readEmbedText(embedDialogueEl);
                 const agentText = readEmbedText(embedAgentEl);
                 if (userText) contextParts.push("[USER]\n" + userText);
-                if (dialogueText) contextParts.push("[DIALOGUE]\n" + dialogueText);
                 if (agentText) contextParts.push("[AGENT LOG]\n" + agentText);
                 const followupContext = contextParts.join("\n\n");
 
@@ -945,18 +939,15 @@ data:
               }
               if (!canReadArtifacts) {
                 embedUserEl.textContent = quickUserInput || "(not found yet)";
-                embedDialogueEl.textContent = "(not found yet)";
                 embedAgentEl.textContent = "(not found yet)";
                 return !isTerminalPhase;
               }
 
               const user = await fetchText(artifactUrl + "user-input.txt");
-              const dialogue = await fetchText(artifactUrl + "dialogue.txt");
               const agent = await fetchText(artifactUrl + "agent.log");
 
               const resolvedUser = user === null ? quickUserInput : (user || quickUserInput);
               embedUserEl.textContent = resolvedUser ? resolvedUser : "(not found yet)";
-              embedDialogueEl.textContent = dialogue === null ? "(not found yet)" : (dialogue || "(empty)");
               embedAgentEl.textContent = agent === null ? "(not found yet)" : (agent || "(empty)");
               return !isTerminalPhase;
             };
