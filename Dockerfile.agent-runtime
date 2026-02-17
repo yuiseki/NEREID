@@ -31,14 +31,15 @@ RUN git clone --depth 1 https://github.com/yuiseki/osmable /tmp/osmable \
   && npm install -g --omit=dev --no-audit --no-fund /tmp/osmable/osmable-*.tgz \
   && rm -rf /tmp/osmable
 
-COPY agents/gemini-workspace /opt/nereid/gemini-workspace
-ENV NEREID_GEMINI_TEMPLATE_ROOT=/opt/nereid/gemini-workspace
-
 # Optional: preinstall Playwright Chromium at image build time.
 ARG INSTALL_PLAYWRIGHT_CHROMIUM=1
 RUN if [ "${INSTALL_PLAYWRIGHT_CHROMIUM}" = "1" ]; then \
       npx -y playwright install chromium; \
     fi
+
+# Keep frequently changed workspace templates late to avoid busting heavy caches.
+COPY agents/gemini-workspace /opt/nereid/gemini-workspace
+ENV NEREID_GEMINI_TEMPLATE_ROOT=/opt/nereid/gemini-workspace
 
 WORKDIR /work
 CMD ["node", "--version"]
