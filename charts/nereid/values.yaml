@@ -25,7 +25,7 @@ images:
 
 agentRuntime:
   # Image used by generated agent.cli.v1 works (spec.agent.image default).
-  image: node:22-bookworm-slim
+  image: nereid-agent-runtime:local
   # Optional override only for legacy kind bridge jobs.
   legacyImage: ""
 

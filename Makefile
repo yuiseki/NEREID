@@ -27,7 +27,7 @@ import-agent-image:
 	set -o pipefail; docker save $(AGENT_IMAGE) | ctr -n $(CTR_NAMESPACE) images import -
 
 helm-upgrade:
-	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) -n $(NAMESPACE) --create-namespace --wait --timeout $(HELM_TIMEOUT) $(HELM_VALUES) $(HELM_UPGRADE_ARGS)
+	helm upgrade --install $(HELM_RELEASE) $(HELM_CHART) -n $(NAMESPACE) --create-namespace --wait --timeout $(HELM_TIMEOUT) $(HELM_VALUES) --set-string agentRuntime.image=$(AGENT_IMAGE) $(HELM_UPGRADE_ARGS)
 
 deploy: build import-agent-image helm-upgrade
 	kubectl -n $(NAMESPACE) rollout restart deployment/$(API_DEPLOYMENT) deployment/$(CONTROLLER_DEPLOYMENT)
