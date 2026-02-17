@@ -1,7 +1,6 @@
 ---
 name: playwright-cli
 description: Automates browser interactions for web testing, form filling, screenshots, and data extraction. Use when the user needs to navigate websites, interact with web pages, fill forms, take screenshots, test web applications, or extract information from web pages.
-allowed-tools: Bash(playwright-cli:*)
 ---
 
 # Browser Automation with playwright-cli
@@ -189,7 +188,7 @@ After each command, playwright-cli provides a snapshot of the current browser st
 - Page URL: https://example.com/
 - Page Title: Example Domain
 ### Snapshot
-[Snapshot](.playwright-cli/page-2026-02-14T19-22-42-679Z.yml)
+Saved snapshot path: `.playwright-cli/page-2026-02-14T19-22-42-679Z.yml`
 ```
 
 You can also take a snapshot on demand using `playwright-cli snapshot` command.

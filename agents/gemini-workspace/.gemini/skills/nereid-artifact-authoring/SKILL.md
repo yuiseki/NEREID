@@ -16,10 +16,11 @@ Create HTML artifacts that can be opened immediately from static hosting.
 - NEVER read, request, print, or persist environment variable values.
 - NEVER output secrets such as API keys into logs, text responses, HTML, JavaScript, or any generated file.
 - Gemini web_fetch tool is allowed for normal HTML pages.
-- For structured JSON APIs (for example Overpass/Nominatim), DO NOT use Gemini web_fetch. Use shell curl or browser-side fetch directly.
+- For OSM/Nominatim workflows, use `osmable ...` first for agent-side retrieval, validation, and deterministic summaries.
+- For structured JSON APIs (for example Overpass/Nominatim), DO NOT use Gemini web_fetch. Use shell curl or browser-side fetch when `osmable` cannot satisfy the task.
 - Never pass raw Overpass QL in a URL query string such as .../api/interpreter?data=[out:json]....
 - For Overpass requests, always URL-encode data (for example encodeURIComponent(query)) or use curl -G --data-urlencode.
-- If a structured API call fails, retry with curl/browser fetch; do not retry with web_fetch.
+- If a structured API call fails, retry with `osmable` or curl/browser fetch; do not retry with web_fetch.
 
 ## Multi-line input handling
 - If the user prompt has multiple bullet or line instructions, treat each line independently.
@@ -37,7 +38,7 @@ Create HTML artifacts that can be opened immediately from static hosting.
 - If Nominatim API is used, use:
   - https://nominatim.yuiseki.net/search.php?format=jsonv2&limit=1&q=<url-encoded-query>
 - Do not append trailing punctuation to API URLs.
-- Prefer browser-side fetch in index.html for map data retrieval.
+- In final `index.html`, prefer browser-side fetch for map data retrieval.
 - If remote APIs fail, still keep index.html viewable and show a concise in-page error message.
 
 ## Output quality
