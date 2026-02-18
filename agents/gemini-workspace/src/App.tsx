@@ -56,7 +56,7 @@ const outlineLayerStyle: LineLayerSpecification = {
  * GeoJSON データのプレースホルダー
  * 生成AIはここを実際のデータURL or インラインデータに置き換える
  */
-const GEOJSON_DATA_URL: string | null = null;
+const GEOJSON_DATA_URL = "./data.geojson";
 
 /**
  * 初期ビューステート
