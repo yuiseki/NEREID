@@ -1,0 +1,191 @@
+{
+    "version": 8,
+    "name": "OSM PMTiles",
+    "sources": {
+        "openmaptiles": {
+            "type": "vector",
+            "url": "pmtiles://https://tile.openstreetmap.jp/static/planet.pmtiles"
+        }
+    },
+    "sprite": "https://tile.openstreetmap.jp/styles/osm-bright-ja/sprite",
+    "glyphs": "https://tile.openstreetmap.jp/fonts/{fontstack}/{range}.pbf",
+    "layers": [
+        {
+            "id": "background",
+            "type": "background",
+            "paint": {
+                "background-color": "#f8f4f0"
+            }
+        },
+        {
+            "id": "water",
+            "type": "fill",
+            "source": "openmaptiles",
+            "source-layer": "water",
+            "paint": {
+                "fill-color": "#a0c8f0"
+            }
+        },
+        {
+            "id": "landcover-wood",
+            "type": "fill",
+            "source": "openmaptiles",
+            "source-layer": "landcover",
+            "filter": [
+                "==",
+                "class",
+                "wood"
+            ],
+            "paint": {
+                "fill-color": "#d0e8d0",
+                "fill-opacity": 0.6
+            }
+        },
+        {
+            "id": "landcover-grass",
+            "type": "fill",
+            "source": "openmaptiles",
+            "source-layer": "landcover",
+            "filter": [
+                "==",
+                "class",
+                "grass"
+            ],
+            "paint": {
+                "fill-color": "#e0f0d8",
+                "fill-opacity": 0.6
+            }
+        },
+        {
+            "id": "building",
+            "type": "fill",
+            "source": "openmaptiles",
+            "source-layer": "building",
+            "minzoom": 13,
+            "paint": {
+                "fill-color": "#dcd9d6",
+                "fill-outline-color": "#b9b6b1"
+            }
+        },
+        {
+            "id": "road-motorway",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "transportation",
+            "filter": [
+                "==",
+                "class",
+                "motorway"
+            ],
+            "paint": {
+                "line-color": "#fc8",
+                "line-width": 2
+            }
+        },
+        {
+            "id": "road-primary",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "transportation",
+            "filter": [
+                "==",
+                "class",
+                "primary"
+            ],
+            "paint": {
+                "line-color": "#fcd6a4",
+                "line-width": 1.5
+            }
+        },
+        {
+            "id": "road-secondary",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "transportation",
+            "filter": [
+                "==",
+                "class",
+                "secondary"
+            ],
+            "paint": {
+                "line-color": "#f9fbe7",
+                "line-width": 1
+            }
+        },
+        {
+            "id": "road-street",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "transportation",
+            "filter": [
+                "in",
+                "class",
+                "minor",
+                "service"
+            ],
+            "minzoom": 13,
+            "paint": {
+                "line-color": "#fff",
+                "line-width": 0.5
+            }
+        },
+        {
+            "id": "railway",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "transportation",
+            "filter": [
+                "==",
+                "class",
+                "rail"
+            ],
+            "paint": {
+                "line-color": "#bbb",
+                "line-width": 1,
+                "line-dasharray": [
+                    3,
+                    3
+                ]
+            }
+        },
+        {
+            "id": "boundary-country",
+            "type": "line",
+            "source": "openmaptiles",
+            "source-layer": "boundary",
+            "filter": [
+                "==",
+                "admin_level",
+                2
+            ],
+            "paint": {
+                "line-color": "#aaa",
+                "line-width": 1
+            }
+        },
+        {
+            "id": "place-city",
+            "type": "symbol",
+            "source": "openmaptiles",
+            "source-layer": "place",
+            "filter": [
+                "==",
+                "class",
+                "city"
+            ],
+            "layout": {
+                "text-field": "{name:latin}\n{name:nonlatin}",
+                "text-font": [
+                    "Noto Sans Regular"
+                ],
+                "text-size": 14,
+                "text-max-width": 8
+            },
+            "paint": {
+                "text-color": "#333",
+                "text-halo-color": "#fff",
+                "text-halo-width": 1.5
+            }
+        }
+    ]
+}
