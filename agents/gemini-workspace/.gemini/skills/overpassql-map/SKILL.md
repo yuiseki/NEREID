@@ -562,35 +562,29 @@ osmable poi fetch --tag leisure=park --within "東京都台東区" --format geoj
 
 ```bash
 # 1回のosmableで1エリアの全コンビニを取得
-osmable poi fetch --tag shop=convenience --within "東京都台東区" --format geojson > /tmp/convenience-taito-all.geojson
-osmable poi fetch --tag shop=convenience --within "東京都文京区" --format geojson > /tmp/convenience-bunkyo-all.geojson
-osmable poi fetch --tag shop=convenience --within "東京都江東区" --format geojson > /tmp/convenience-koto-all.geojson
+osmable poi fetch --tag shop=convenience --within "東京都台東区" --format geojson > /tmp/conv-taito.geojson
+osmable poi fetch --tag shop=convenience --within "東京都文京区" --format geojson > /tmp/conv-bunkyo.geojson
+osmable poi fetch --tag shop=convenience --within "東京都江東区" --format geojson > /tmp/conv-koto.geojson
+```
 
-# Pythonでチェーン名フィルタリング（nameプロパティで分割）
-python3 << 'EOF'
+```python
+# split_convenience.py として保存して実行すること（ヒアドキュメントは使わない）
 import json, os
 os.makedirs("public/layers", exist_ok=True)
+CHAINS = {"seven-eleven": ["セブン-イレブン", "セブンイレブン", "7-Eleven"], "familymart": ["ファミリーマート", "FamilyMart"], "lawson": ["ローソン", "Lawson"]}
+WARDS = {"taito": "/tmp/conv-taito.geojson", "bunkyo": "/tmp/conv-bunkyo.geojson", "koto": "/tmp/conv-koto.geojson"}
+for ward, ward_file in WARDS.items():
+    all_data = json.load(open(ward_file))
+    for chain_id, names in CHAINS.items():
+        feats = [f for f in all_data["features"] if any(n in f.get("properties", {}).get("name", "") for n in names)]
+        json.dump({"type": "FeatureCollection", "features": feats}, open(f"public/layers/{chain_id}-{ward}.geojson", "w"), ensure_ascii=False)
+        print(f"{chain_id}-{ward}: {len(feats)}")
+```
 
-CHAINS = {
-    "seven-eleven": ["セブン-イレブン", "セブンイレブン", "7-Eleven", "Seven-Eleven"],
-    "familymart":   ["ファミリーマート", "FamilyMart"],
-    "lawson":       ["ローソン", "Lawson"],
-}
-
-for ward, ward_file in [("taito", "/tmp/convenience-taito-all.geojson"),
-                         ("bunkyo", "/tmp/convenience-bunkyo-all.geojson"),
-                         ("koto", "/tmp/convenience-koto-all.geojson")]:
-    with open(ward_file) as f:
-        all_data = json.load(f)
-    for chain_id, chain_names in CHAINS.items():
-        feats = [ft for ft in all_data["features"]
-                 if any(n in ft.get("properties", {}).get("name", "") for n in chain_names)]
-        out = {"type": "FeatureCollection", "features": feats}
-        out_path = f"public/layers/{chain_id}-{ward}.geojson"
-        with open(out_path, "w") as f:
-            json.dump(out, f, ensure_ascii=False)
-        print(f"{chain_id}-{ward}: {len(feats)} features")
-EOF
+```bash
+# Pythonスクリプトをファイルとして書き出して実行（ヒアドキュメント使用禁止）
+# 上記のPythonコードをファイルに書き出して実行すること:
+python3 /tmp/split_convenience.py
 ```
 
 **curl + Overpass API（osmableが使えない/0件の場合）:**
