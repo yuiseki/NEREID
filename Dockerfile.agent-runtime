@@ -41,9 +41,14 @@ RUN if [ "${INSTALL_PLAYWRIGHT_CHROMIUM}" = "1" ]; then \
 
 # Keep frequently changed workspace templates late to avoid busting heavy caches.
 COPY agents/gemini-workspace /opt/nereid/gemini-workspace
-# Remove stale build artifacts so fresh workspaces start clean.
-RUN rm -rf /opt/nereid/gemini-workspace/node_modules \
-           /opt/nereid/gemini-workspace/dist
+# Pre-build the React app so agents can use `make fast-build` (copy data only)
+# instead of re-running npm install + vite build on every job.
+# node_modules is removed after build to keep workspace copy lightweight.
+RUN cd /opt/nereid/gemini-workspace \
+  && npm ci \
+  && npm run build \
+  && cp -r dist/. ./ \
+  && rm -rf dist node_modules
 ENV NEREID_GEMINI_TEMPLATE_ROOT=/opt/nereid/gemini-workspace
 
 WORKDIR /work

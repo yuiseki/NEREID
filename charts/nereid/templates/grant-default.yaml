@@ -38,4 +38,8 @@ spec:
         key: {{ .Values.grants.default.geminiSecretKey | quote }}
         optional: {{ .Values.grants.default.geminiSecretOptional }}
     {{- end }}
+    {{- if .Values.grants.default.geminiTimeoutSeconds }}
+    - name: NEREID_GEMINI_TIMEOUT_SECONDS
+      value: {{ .Values.grants.default.geminiTimeoutSeconds | quote }}
+    {{- end }}
 {{- end }}

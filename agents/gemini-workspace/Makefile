@@ -1,4 +1,4 @@
-.PHONY: install dev build clean typecheck help
+.PHONY: install dev build fast-build clean typecheck help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
@@ -13,6 +13,11 @@ build: install ## Build for production and copy dist to root
 	npm run build
 	cp -r dist/. ./
 	@echo "Build complete. dist/ contents copied to project root."
+
+fast-build: ## Deploy data files only (JS/CSS pre-built in image; skips npm build)
+	mkdir -p ./layers
+	cp -r public/layers/. ./layers/
+	@echo "Fast build complete. Data files deployed to ./layers/"
 
 typecheck: ## Run TypeScript type checking
 	npx tsc --noEmit

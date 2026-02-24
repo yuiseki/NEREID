@@ -555,6 +555,44 @@ mkdir -p public/layers
 osmable poi fetch --tag leisure=park --within "東京都台東区" --format geojson > public/layers/parks-taito.geojson
 ```
 
+**複数チェーン・複数エリアの場合（コンビニ等）: 1エリア1クエリで全店取得→Python分割（必須最適化）**
+
+複数チェーン（セブン・ファミマ・ローソン等）×複数エリアのクエリは、チェーン×エリア数だけ個別クエリを叩くと時間切れになる。
+必ず「1エリアで全店取得」→「Pythonでチェーン別に分割」のパターンを使うこと：
+
+```bash
+# 1回のosmableで1エリアの全コンビニを取得
+osmable poi fetch --tag shop=convenience --within "東京都台東区" --format geojson > /tmp/convenience-taito-all.geojson
+osmable poi fetch --tag shop=convenience --within "東京都文京区" --format geojson > /tmp/convenience-bunkyo-all.geojson
+osmable poi fetch --tag shop=convenience --within "東京都江東区" --format geojson > /tmp/convenience-koto-all.geojson
+
+# Pythonでチェーン名フィルタリング（nameプロパティで分割）
+python3 << 'EOF'
+import json, os
+os.makedirs("public/layers", exist_ok=True)
+
+CHAINS = {
+    "seven-eleven": ["セブン-イレブン", "セブンイレブン", "7-Eleven", "Seven-Eleven"],
+    "familymart":   ["ファミリーマート", "FamilyMart"],
+    "lawson":       ["ローソン", "Lawson"],
+}
+
+for ward, ward_file in [("taito", "/tmp/convenience-taito-all.geojson"),
+                         ("bunkyo", "/tmp/convenience-bunkyo-all.geojson"),
+                         ("koto", "/tmp/convenience-koto-all.geojson")]:
+    with open(ward_file) as f:
+        all_data = json.load(f)
+    for chain_id, chain_names in CHAINS.items():
+        feats = [ft for ft in all_data["features"]
+                 if any(n in ft.get("properties", {}).get("name", "") for n in chain_names)]
+        out = {"type": "FeatureCollection", "features": feats}
+        out_path = f"public/layers/{chain_id}-{ward}.geojson"
+        with open(out_path, "w") as f:
+            json.dump(out, f, ensure_ascii=False)
+        print(f"{chain_id}-{ward}: {len(feats)} features")
+EOF
+```
+
 **curl + Overpass API（osmableが使えない/0件の場合）:**
 ```bash
 QUERY='[out:json][timeout:30000];
@@ -656,11 +694,14 @@ python3 -c "import json; d=json.load(open('public/layers/ramen-taito.geojson'));
 
 ### STEP 5: ビルド
 
+JS/CSSはイメージ内で事前ビルド済みのため、データファイルのみデプロイする高速ビルドを使用すること：
+
 ```bash
-make build
+make fast-build
 ```
 
-ビルドエラーが出た場合は必ず修正してから完了を報告すること。
+`make fast-build` は `public/layers/` の内容を `./layers/` にコピーするだけで完了する。
+`make build`（フルビルド）は使用しないこと。フルビルドは数分かかりタイムアウトの原因になる。
 
 ---
 
@@ -826,6 +867,6 @@ National treasure castles: nwr["historic"="castle"]["heritage"]
 
 1. **GeoJSON features が 0**: 別のタグでクエリを再試行。`name:en` を `name` に変更して再試行。
 2. **osmable 失敗**: curl + Overpass API に切り替える。
-3. **make build エラー**: TypeScriptエラーを修正してから再実行。絶対に未修正のまま完了を報告しない。
+3. **make fast-build エラー**: `public/layers/` ディレクトリが存在するか確認してから再実行。
 4. **Overpass timeout**: クエリを絞り込むか、エリアを小さくする。
 5. **config.json が読めない**: `public/layers/` ディレクトリが存在するか確認。`mkdir -p public/layers` を実行。

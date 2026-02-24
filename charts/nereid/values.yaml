@@ -60,6 +60,8 @@ grants:
     geminiSecretName: "nereid-gemini"
     geminiSecretKey: "api-key"
     geminiSecretOptional: true
+    # Gemini CLI timeout in seconds. Complex multi-layer map requests need more time.
+    geminiTimeoutSeconds: "360"
 
 controller:
   enabled: true
