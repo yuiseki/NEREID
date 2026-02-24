@@ -41,7 +41,7 @@ fail_validation() {
   count=$((count + 1))
   printf '%s\n' "${count}" > "${STATE_FILE}"
 
-  if [ "${count}" -ge 2 ] || [ "${IS_RETRY}" = "true" ]; then
+  if [ "${count}" -ge 3 ] || [ "${IS_RETRY}" = "true" ]; then
     emit_stop "index.html validation still failing after retry: ${msg}"
   else
     emit_deny "index.html validation failed: ${msg}"
@@ -84,12 +84,14 @@ fi
 if [ -f "${PROMPT_FILE}" ] && grep -Eqi '公園|park' "${PROMPT_FILE}"; then
   has_park_data=false
   park_files=""
+  # Check root-level files (legacy paths)
   for path in \
     "${PROJECT_DIR}/parks.geojson" \
     "${PROJECT_DIR}/parks.json" \
     "${PROJECT_DIR}/parks_feature_collection.geojson" \
     "${PROJECT_DIR}/overpass.json" \
-    "${PROJECT_DIR}/poi.json"
+    "${PROJECT_DIR}/poi.json" \
+    "${PROJECT_DIR}/data.geojson"
   do
     if [ -s "${path}" ]; then
       has_park_data=true
@@ -97,8 +99,18 @@ if [ -f "${PROMPT_FILE}" ] && grep -Eqi '公園|park' "${PROMPT_FILE}"; then
       break
     fi
   done
+  # Check public/layers/ directory (multi-layer architecture)
+  if [ "${has_park_data}" != "true" ] && [ -d "${PROJECT_DIR}/public/layers" ]; then
+    for path in "${PROJECT_DIR}/public/layers/"*.geojson "${PROJECT_DIR}/public/layers/"*.json; do
+      if [ -f "${path}" ] && [ -s "${path}" ]; then
+        has_park_data=true
+        park_files="${park_files} ${path}"
+        break
+      fi
+    done
+  fi
   if [ "${has_park_data}" != "true" ]; then
-    fail_validation "park request detected, but no non-empty park dataset artifact was produced."
+    fail_validation "park request detected, but no non-empty park dataset artifact was produced. Save GeoJSON to parks.geojson (root) or public/layers/*.geojson."
   fi
   for path in ${park_files}; do
     if grep -Eqi 'placeholder|dummy|サンプル|仮データ' "${path}"; then
