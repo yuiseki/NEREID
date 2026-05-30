@@ -4,6 +4,8 @@ description: z.yuiseki.net/static/geojson/ の静的 GeoJSON ファイルをダ�
 ---
 # Static GeoJSON Map スキル
 
+## CRITICAL: Do NOT read src/App.tsx. Do NOT modify src/App.tsx.
+
 ## 利用可能な静的 GeoJSON ファイル
 
 | ファイル | URL | 内容 | フィーチャ型 |
