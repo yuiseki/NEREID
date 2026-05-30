@@ -1001,13 +1001,59 @@ out skel qt;`,
 	case containsAll(normalized, "人口密度", "国") && containsAny(normalized, "一番高い", "最も高い"):
 		return instructionWorkPlan{
 			baseName: "highest-pop-density-country",
-			spec: buildOverpassSpec(
-				"Highest population density country (Natural Earth estimate): Bangladesh",
-				`[out:json][timeout:120];
-relation["boundary"="administrative"]["admin_level"="2"]["name:en"="Bangladesh"];
-out geom;`,
-				90.3563, 23.6849, 6,
-			),
+			spec: map[string]interface{}{
+				"kind":  "maplibre.style.v1",
+				"title": "Highest population density country (Natural Earth estimate): Bangladesh",
+				"style": map[string]interface{}{
+					"sourceStyle": map[string]interface{}{
+						"mode": "inline",
+						"json": `{
+  "version": 8,
+  "sources": {
+    "maplibre": {
+      "type": "vector",
+      "url": "https://demotiles.maplibre.org/tiles/tiles.json"
+    }
+  },
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#f2efe7" } },
+    { "id": "countries-base", "type": "fill", "source": "maplibre", "source-layer": "countries", "paint": { "fill-color": "#dddddd", "fill-opacity": 0.7 } },
+    {
+      "id": "country-bangladesh-highlight",
+      "type": "fill",
+      "source": "maplibre",
+      "source-layer": "countries",
+      "filter": ["==", ["coalesce", ["get", "name_en"], ["get", "name"]], "Bangladesh"],
+      "paint": { "fill-color": "#e74c3c", "fill-opacity": 0.75 }
+    },
+    { "id": "countries-boundary", "type": "line", "source": "maplibre", "source-layer": "countries", "paint": { "line-color": "#666666", "line-width": 0.8 } },
+    {
+      "id": "countries-label",
+      "type": "symbol",
+      "source": "maplibre",
+      "source-layer": "centroids",
+      "layout": { "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]], "text-size": 11 },
+      "paint": { "text-color": "#222222", "text-halo-color": "#ffffff", "text-halo-width": 1.1 }
+    }
+  ]
+}`,
+					},
+					"validate": true,
+				},
+				"render": map[string]interface{}{
+					"viewport": map[string]interface{}{
+						"center": []float64{90.3563, 23.6849},
+						"zoom":   5.0,
+					},
+				},
+				"constraints": map[string]interface{}{
+					"deadlineSeconds": int64(300),
+				},
+				"artifacts": map[string]interface{}{
+					"layout": "style",
+				},
+			},
 		}, nil
 
 	case containsAll(normalized, "日本", "国") && containsAny(normalized, "一番近い", "最も近い"):

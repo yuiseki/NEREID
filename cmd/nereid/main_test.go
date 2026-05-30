@@ -119,7 +119,7 @@ func TestPlanWorksFromInstructionTextSupportsRequestedFiveLines(t *testing.T) {
 		"overpassql.map.v1",
 		"overpassql.map.v1",
 		"maplibre.style.v1",
-		"overpassql.map.v1",
+		"maplibre.style.v1",
 		"maplibre.style.v1",
 	}
 	for i := range wantKinds {
@@ -136,6 +136,11 @@ func TestPlanWorksFromInstructionTextSupportsRequestedFiveLines(t *testing.T) {
 	secondQuery := plans[1].spec["overpass"].(map[string]interface{})["query"].(string)
 	if !strings.Contains(secondQuery, `"admin_level"="7"`) {
 		t.Fatalf("second query should target admin_level=7, got:\n%s", secondQuery)
+	}
+
+	fourthStyle := plans[3].spec["style"].(map[string]interface{})["sourceStyle"].(map[string]interface{})["json"].(string)
+	if !strings.Contains(fourthStyle, "Bangladesh") {
+		t.Fatalf("fourth style should reference Bangladesh highlight, got:\n%s", fourthStyle)
 	}
 
 	fifthStyle := plans[4].spec["style"].(map[string]interface{})["sourceStyle"].(map[string]interface{})["json"].(string)
