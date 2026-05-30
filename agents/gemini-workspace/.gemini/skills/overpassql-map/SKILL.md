@@ -26,7 +26,10 @@ ColorForConcern: <施設種別>, <Web Safe Color名>
 ShowPopupOnClick: true/false
 ```
 
-- エリアは英語表記に変換（台東区→Taito, 文京区→Bunkyo, 渋谷区→Shibuya, 千代田区→Chiyoda, 港区→Minato, 墨田区→Sumida, 江東区→Koto, 新宿区→Shinjuku, 中央区→Chuo）
+- **カバレッジは全世界** (planet データ)。日本の区だけでなく海外の都市・地域も扱える
+- 日本の区の英語表記（長音符なし）: 台東区→Taito, 文京区→Bunkyo, 渋谷区→Shibuya, 千代田区→Chiyoda, 港区→Minato, 墨田区→Sumida, 江東区→Koto, 新宿区→Shinjuku, 中央区→Chuo
+- 海外エリアは英語名をそのまま使用（例: `area["name:en"="Paris"]`, `area["name:en"="New York City"]`）
+  - 見つからない場合は Nominatim で osm_id を取得して `area(3600000000 + osm_id)` を使う
 - 病院を求められたら医院(Doctors)も必ず追加
 - OSMに存在しないデータは `No map specified.` を出力して停止
 

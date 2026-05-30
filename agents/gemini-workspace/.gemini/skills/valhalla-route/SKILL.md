@@ -6,8 +6,8 @@ description: Valhalla ルーティング API を使って出発地→目的地�
 # Valhalla Route スキル
 
 ## 環境制約
-- Valhalla エンドポイント: `https://valhalla.yuiseki.net/route`（POST, JSON）
-- Nominatim: `https://nominatim.yuiseki.net/search.php?q=<地名>&format=json`（座標取得）
+- Valhalla エンドポイント: `https://valhalla.yuiseki.net/route`（POST, JSON）**全世界対応 (planet データ)**
+- Nominatim: `https://nominatim.yuiseki.net/search.php?q=<地名>&format=json`（座標取得）**全世界対応**
 - ビルド: **`make fast-build`** のみ（`make build` 禁止）
 
 ## ワークフロー（4ステップ）

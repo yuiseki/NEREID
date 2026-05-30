@@ -6,13 +6,15 @@
 
 ### 利用可能なネットワークサービス
 
-| サービス | URL | 用途 |
-|---------|-----|------|
-| Overpass API | `https://overpass.yuiseki.net/api/interpreter` | OSM データ取得 |
-| Nominatim | `https://nominatim.yuiseki.net/search.php?q=<地名>&format=json` | ジオコーディング（地名→座標） |
-| Valhalla | `https://valhalla.yuiseki.net/route` | ルーティング（POST, JSON） |
-| 静的ファイル | `https://z.yuiseki.net/static/geojson/` | 既製 GeoJSON データ |
-| マップタイル | `https://tile.yuiseki.net/` | ベクタータイルスタイル |
+| サービス | URL | 用途 | カバレッジ |
+|---------|-----|------|----------|
+| Overpass API | `https://overpass.yuiseki.net/api/interpreter` | OSM データ取得 | **全世界** (planet) |
+| Nominatim | `https://nominatim.yuiseki.net/search.php?q=<地名>&format=json` | ジオコーディング（地名→座標） | **全世界** (planet) |
+| Valhalla | `https://valhalla.yuiseki.net/route` | ルーティング（POST, JSON） | **全世界** (planet) |
+| 静的ファイル | `https://z.yuiseki.net/static/geojson/` | 既製 GeoJSON データ | 世界 |
+| マップタイル | `https://tile.yuiseki.net/` | ベクタータイルスタイル | 全世界 |
+
+全サービスは `osm-planet-in-da-house` (3TB planet データ) によりグローバルカバレッジ。日本国内だけでなく世界中の地名・ルート・POI を扱える。
 
 **Overpass**: `overpass-api.de`, `overpass.kumi.systems`, `overpass.openstreetmap.ru` は到達不可
 
