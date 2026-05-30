@@ -82,31 +82,46 @@ out geom;
 osmcli poi fetch --tag amenity=cafe --within "東京都台東区" --format geojson > public/layers/cafe-taito.geojson
 ```
 
-**osmcli 失敗時 — Nominatim で osm_id を取得して Overpass クエリを確実化:**
-```bash
-# 1. Nominatim で区の osm_id を取得（name:en に依存せず確実）
-NOM=$(curl -s "https://nominatim.yuiseki.net/search.php?q=東京都台東区&format=json&limit=1")
-OSM_ID=$(echo "$NOM" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['osm_id'])")
-AREA_ID=$((3600000000 + OSM_ID))
-echo "台東区 area_id: $AREA_ID"
+**osmcli 失敗時 — Python + Nominatim で osm_id を取得して Overpass クエリを確実化:**
+```python
+python3 << 'EOF'
+import urllib.request, urllib.parse, json, os
 
-# 2. Overpass クエリで area(AREA_ID) を使用（name:en 不要）
-QUERY="[out:json][timeout:30000];area($AREA_ID);(nwr[\"amenity\"=\"cafe\"](area););out geom;"
-curl -s "https://overpass.yuiseki.net/api/interpreter?data=$(python3 -c \"import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))\" \"$QUERY\")" -o /tmp/overpass_raw.json
-python3 -c "
-import json
-data = json.load(open('/tmp/overpass_raw.json'))
+# 1. Nominatim で区の osm_id を取得（name:en に依存せず確実）
+def geocode_osm_id(place):
+    url = "https://nominatim.yuiseki.net/search.php?" + urllib.parse.urlencode({
+        "q": place, "format": "json", "limit": "1"
+    })
+    req = urllib.request.Request(url, headers={"User-Agent": "NereidMap/1.0"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        results = json.loads(r.read())
+    return int(results[0]["osm_id"]), results[0]["osm_type"]
+
+osm_id, osm_type = geocode_osm_id("東京都台東区")
+area_id = 3600000000 + osm_id  # relation → area
+print(f"台東区 area_id: {area_id}")
+
+# 2. Overpass クエリで area(area_id) を使用（name:en 不要）
+query = f'[out:json][timeout:30000];area({area_id});(nwr["amenity"="cafe"](area););out geom;'
+url = "https://overpass.yuiseki.net/api/interpreter?" + urllib.parse.urlencode({"data": query})
+with urllib.request.urlopen(url, timeout=60) as r:
+    data = json.loads(r.read())
+
 features = []
-for el in data.get('elements', []):
-    props = el.get('tags', {}); props['osm_id'] = el.get('id')
-    if el['type'] == 'node':
-        features.append({'type':'Feature','geometry':{'type':'Point','coordinates':[el['lon'],el['lat']]},'properties':props})
-    elif el['type'] in ['way','relation'] and 'geometry' in el:
-        coords = [[p['lon'],p['lat']] for p in el['geometry']]
-        geom = {'type':'Polygon','coordinates':[coords]} if len(coords)>=3 and coords[0]==coords[-1] else {'type':'LineString','coordinates':coords}
-        features.append({'type':'Feature','geometry':geom,'properties':props})
-print(json.dumps({'type':'FeatureCollection','features':features},ensure_ascii=False))
-" > public/layers/cafe-taito.geojson
+for el in data.get("elements", []):
+    props = el.get("tags", {}); props["osm_id"] = el.get("id")
+    if el["type"] == "node":
+        features.append({"type":"Feature","geometry":{"type":"Point","coordinates":[el["lon"],el["lat"]]},"properties":props})
+    elif el["type"] in ["way","relation"] and "geometry" in el:
+        coords = [[p["lon"],p["lat"]] for p in el["geometry"]]
+        geom = {"type":"Polygon","coordinates":[coords]} if len(coords)>=3 and coords[0]==coords[-1] else {"type":"LineString","coordinates":coords}
+        features.append({"type":"Feature","geometry":geom,"properties":props})
+
+os.makedirs("public/layers", exist_ok=True)
+with open("public/layers/cafe-taito.geojson", "w") as f:
+    json.dump({"type":"FeatureCollection","features":features}, f, ensure_ascii=False)
+print(f"Saved {len(features)} features")
+EOF
 ```
 
 **curl + Overpass API（osmcliが使えない/0件の場合）:**

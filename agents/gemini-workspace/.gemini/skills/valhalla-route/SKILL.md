@@ -14,20 +14,28 @@ description: Valhalla ルーティング API を使って出発地→目的地�
 
 ### STEP 1: 出発地・目的地の座標取得
 
-`legacy-work-spec.json` の `routing.from` / `routing.to` から地名を読む。座標が未指定なら Nominatim でジオコーディング:
+`legacy-work-spec.json` の `routing.from` / `routing.to` から地名を読む。**座標取得は Python スクリプトで行う**（日本語URL エンコーディングの問題を回避):
 
-```bash
-# 出発地: 東京駅
-FROM=$(curl -s "https://nominatim.yuiseki.net/search.php?q=東京駅&format=json&limit=1" \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['lat'], d[0]['lon'])")
-FROM_LAT=$(echo $FROM | cut -d' ' -f1)
-FROM_LON=$(echo $FROM | cut -d' ' -f2)
+```python
+python3 << 'EOF'
+import urllib.request, urllib.parse, json
 
-# 目的地: 上野駅
-TO=$(curl -s "https://nominatim.yuiseki.net/search.php?q=上野駅&format=json&limit=1" \
-  | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['lat'], d[0]['lon'])")
-TO_LAT=$(echo $TO | cut -d' ' -f1)
-TO_LON=$(echo $TO | cut -d' ' -f2)
+def geocode(place):
+    url = "https://nominatim.yuiseki.net/search.php?" + urllib.parse.urlencode({
+        "q": place, "format": "json", "limit": "1"
+    })
+    req = urllib.request.Request(url, headers={"User-Agent": "NereidMap/1.0"})
+    with urllib.request.urlopen(req, timeout=10) as r:
+        results = json.loads(r.read())
+    if not results:
+        raise ValueError(f"Nominatim: no results for '{place}'")
+    return float(results[0]["lat"]), float(results[0]["lon"])
+
+from_lat, from_lon = geocode("東京駅")
+to_lat, to_lon   = geocode("上野駅")
+print(f"FROM: {from_lat},{from_lon}")
+print(f"TO:   {to_lat},{to_lon}")
+EOF
 ```
 
 コスティング選択:
