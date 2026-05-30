@@ -37,6 +37,7 @@ spec:
                   enum:
                     - overpassql.map.v1
                     - maplibre.style.v1
+                    - static.geojson.v1
                     - duckdb.map.v1
                     - gdal.rastertile.v1
                     - laz.3dtiles.v1
@@ -59,6 +60,26 @@ spec:
                       type: array
                       items:
                         type: string
+                staticFiles:
+                  type: array
+                  items:
+                    type: object
+                    required: ["url", "layerId"]
+                    properties:
+                      url:
+                        type: string
+                      layerId:
+                        type: string
+                      name:
+                        type: string
+                      emoji:
+                        type: string
+                      color:
+                        type: string
+                      outlineColor:
+                        type: string
+                      showMarker:
+                        type: boolean
                 routing:
                   type: object
                   required: ["from", "to"]

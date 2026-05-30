@@ -249,7 +249,7 @@ func isTerminalWorkPhase(phase string) bool {
 
 func (c *Controller) buildJob(work *unstructured.Unstructured, jobName, kind string) (*batchv1.Job, error) {
 	switch kind {
-	case "overpassql.map.v1", "maplibre.style.v1", "duckdb.map.v1", "gdal.rastertile.v1", "laz.3dtiles.v1", "valhalla.route.v1":
+	case "overpassql.map.v1", "maplibre.style.v1", "static.geojson.v1", "duckdb.map.v1", "gdal.rastertile.v1", "laz.3dtiles.v1", "valhalla.route.v1":
 		legacySpec, found, err := unstructured.NestedMap(work.Object, "spec")
 		if err != nil {
 			return nil, fmt.Errorf("failed to read spec for legacy kind bridge: %v", err)
@@ -574,6 +574,8 @@ func legacyKindSkillName(kind string) (string, error) {
 		return "laz-3dtiles", nil
 	case "valhalla.route.v1":
 		return "valhalla-route", nil
+	case "static.geojson.v1":
+		return "static-geojson-map", nil
 	default:
 		return "", fmt.Errorf("unsupported legacy kind for bridge: %q", kind)
 	}

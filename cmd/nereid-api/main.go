@@ -1359,6 +1359,11 @@ func validatePlannedSpec(spec map[string]interface{}) error {
 			return fmt.Errorf(`unsupported spec.style.sourceStyle.mode=%q`, mode)
 		}
 	case "duckdb.map.v1", "gdal.rastertile.v1", "laz.3dtiles.v1":
+	case "static.geojson.v1":
+		files, _ := spec["staticFiles"].([]interface{})
+		if len(files) == 0 {
+			return errors.New(`spec.staticFiles is required for static.geojson.v1`)
+		}
 	case "valhalla.route.v1":
 		routing, _ := spec["routing"].(map[string]interface{})
 		if routing == nil {
@@ -1618,8 +1623,132 @@ out skel qt;`,
 				"artifacts":   map[string]interface{}{"layout": "map"},
 			},
 		}, nil
+
+	// tile.yuiseki.net thematic styles
+	case containsAny(normalized, "紛争", "コンフリクト", "武力衝突", "armed conflict"):
+		return tileYuisekiNetPlan("conflicts", "UCDP 武力紛争データ", 20, 10, 2.0), nil
+	case containsAny(normalized, "生物多様性", "保護区", "biodiversity"):
+		return tileYuisekiNetPlan("biodiversity", "世界の生物多様性・保護区", 0, 20, 1.7), nil
+	case containsAny(normalized, "平和維持", "国連ミッション", "peacekeeping", "国連平和"):
+		return tileYuisekiNetPlan("peacekeeping_network", "国連平和維持ネットワーク", 20, 10, 2.0), nil
+	case containsAny(normalized, "海底ケーブル", "通信インフラ", "submarine cable", "global connectivity"):
+		return tileYuisekiNetPlan("global_connectivity", "グローバル通信インフラ・海底ケーブル", 0, 20, 1.7), nil
+	case containsAny(normalized, "エネルギー転換", "再生可能エネルギー", "energy transition", "洋上風力"):
+		return tileYuisekiNetPlan("energy_transition", "エネルギー転換・再生可能エネルギー", 0, 20, 1.7), nil
+	case containsAny(normalized, "防災", "自然災害", "disaster prevention") && containsAny(normalized, "表示", "マップ", "地図"):
+		return tileYuisekiNetPlan("disaster_prevention", "防災・自然災害リスクマップ", 0, 20, 1.7), nil
+	case containsAny(normalized, "水ストレス", "水資源", "water stress"):
+		return tileYuisekiNetPlan("water_stress", "世界の水ストレス・水資源", 0, 20, 1.7), nil
+	case containsAny(normalized, "プレートテクトニクス", "地殻変動", "tectonic") && containsAny(normalized, "表示", "マップ", "地図"):
+		return tileYuisekiNetPlan("global_seismic_alerts", "プレートテクトニクス・地震リスク", 0, 20, 1.7), nil
+	case containsAny(normalized, "鉄道", "railway", "rail network") && !containsAny(normalized, "駅") &&
+		containsAny(normalized, "世界", "グローバル", "全球", "global"):
+		return tileYuisekiNetPlan("railways", "世界の鉄道ネットワーク", 0, 20, 1.7), nil
+	case containsAny(normalized, "河川", "川", "river", "水系") && containsAny(normalized, "世界", "グローバル", "global"):
+		return tileYuisekiNetPlan("rivers", "世界の河川・水系", 0, 20, 1.7), nil
+
+	// static GeoJSON from z.yuiseki.net
+	case containsAny(normalized, "地震", "earthquake", "seismic") && containsAny(normalized, "最近", "最新", "今月", "recent"):
+		return staticGeoJSONPlan("usgs-earthquakes", "最新の地震データ (USGS M4.5+)",
+			[]staticFileSpec{{
+				URL:        "https://z.yuiseki.net/static/geojson/usgs_m45_month.geojson",
+				LayerID:    "usgs-earthquakes",
+				Name:       "地震 (M4.5+, 直近30日)",
+				Emoji:      "🔴",
+				Color:      "rgba(255,87,34,0.6)",
+				OutlineColor: "#b71c1c",
+				ShowMarker: true,
+			}}, 0, 20, 1.7), nil
+	case containsAll(normalized, "プレート", "境界") || containsAll(normalized, "tectonic", "plates"):
+		return staticGeoJSONPlan("tectonic-plates", "プレートテクトニクス境界線",
+			[]staticFileSpec{{
+				URL:        "https://z.yuiseki.net/static/geojson/tectonicplates_GeoJSON_PB2002_boundaries.json",
+				LayerID:    "tectonic-plates",
+				Name:       "プレート境界線",
+				Emoji:      "🌋",
+				Color:      "rgba(156,39,176,0.8)",
+				OutlineColor: "#4a148c",
+				ShowMarker: false,
+			}}, 0, 20, 1.7), nil
+	case containsAny(normalized, "海底ケーブル", "submarine cable") && !containsAny(normalized, "インフラ"):
+		return staticGeoJSONPlan("submarine-cables", "世界の海底ケーブル",
+			[]staticFileSpec{{
+				URL:        "https://z.yuiseki.net/static/geojson/cable-geo.json",
+				LayerID:    "submarine-cables",
+				Name:       "海底ケーブル",
+				Emoji:      "🔌",
+				Color:      "rgba(33,150,243,0.8)",
+				OutlineColor: "#0d47a1",
+				ShowMarker: false,
+			}}, 0, 20, 1.7), nil
 	}
 	return instructionWorkPlan{}, fmt.Errorf("unsupported instruction line: %q", line)
+}
+
+type staticFileSpec struct {
+	URL          string
+	LayerID      string
+	Name         string
+	Emoji        string
+	Color        string
+	OutlineColor string
+	ShowMarker   bool
+}
+
+func tileYuisekiNetPlan(styleName, title string, lon, lat, zoom float64) instructionWorkPlan {
+	return instructionWorkPlan{
+		baseName: styleName + "-map",
+		spec: map[string]interface{}{
+			"kind":  "maplibre.style.v1",
+			"title": title,
+			"style": map[string]interface{}{
+				"sourceStyle": map[string]interface{}{
+					"mode": "url",
+					"url":  "https://tile.yuiseki.net/styles/" + styleName + "/style.json",
+				},
+				"validate": false,
+			},
+			"render": map[string]interface{}{
+				"viewport": map[string]interface{}{
+					"center": []float64{lon, lat},
+					"zoom":   zoom,
+				},
+			},
+			"constraints": map[string]interface{}{"deadlineSeconds": int64(300)},
+			"artifacts":   map[string]interface{}{"layout": "style"},
+		},
+	}
+}
+
+func staticGeoJSONPlan(baseName, title string, files []staticFileSpec, lon, lat, zoom float64) instructionWorkPlan {
+	fileSpecs := make([]map[string]interface{}, len(files))
+	for i, f := range files {
+		fileSpecs[i] = map[string]interface{}{
+			"url":          f.URL,
+			"layerId":      f.LayerID,
+			"name":         f.Name,
+			"emoji":        f.Emoji,
+			"color":        f.Color,
+			"outlineColor": f.OutlineColor,
+			"showMarker":   f.ShowMarker,
+		}
+	}
+	return instructionWorkPlan{
+		baseName: baseName,
+		spec: map[string]interface{}{
+			"kind":        "static.geojson.v1",
+			"title":       title,
+			"staticFiles": fileSpecs,
+			"render": map[string]interface{}{
+				"viewport": map[string]interface{}{
+					"center": []float64{lon, lat},
+					"zoom":   zoom,
+				},
+			},
+			"constraints": map[string]interface{}{"deadlineSeconds": int64(300)},
+			"artifacts":   map[string]interface{}{"layout": "map"},
+		},
+	}
 }
 
 func extractRoutingParams(text string) (from, to, costing string) {
