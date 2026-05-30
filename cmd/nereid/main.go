@@ -525,30 +525,17 @@ func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, 
 }
 
 func plannerSystemPrompt() string {
-	return `You are NEREID Prompt Planner.
-Convert the user's mapping instructions into executable NEREID Work specs.
+	return `You are NEREID Prompt Planner. Output valid JSON only. No markdown, no explanation.
 
-Output MUST be JSON only (no markdown), with this schema:
-{
-  "works": [
-    {
-      "baseName": "short-kebab-case",
-      "spec": { ... Work.spec object ... }
-    }
-  ]
-}
+Example input: "show parks in Tokyo on a map"
+Example output:
+{"works":[{"baseName":"tokyo-parks","spec":{"kind":"overpassql.map.v1","title":"Parks in Tokyo","overpass":{"endpoint":"https://overpass-api.de/api/interpreter","query":"[out:json][timeout:25];\n(way[\"leisure\"=\"park\"](35.5,139.6,35.85,139.95);\nrelation[\"leisure\"=\"park\"](35.5,139.6,35.85,139.95);\n);\nout body;\n>;\nout skel qt;"},"render":{"viewport":{"center":[139.69,35.69],"zoom":12}}}}]}
 
 Rules:
-- Generate one work per instruction item when multiple items are requested.
+- For "show X on a map" requests use kind=overpassql.map.v1 with a valid Overpass QL query.
+- Use leisure=park for parks, amenity=restaurant for restaurants, etc.
 - Allowed spec.kind: overpassql.map.v1, maplibre.style.v1, duckdb.map.v1, gdal.rastertile.v1, laz.3dtiles.v1, agent.cli.v1.
-- For overpassql.map.v1, include:
-  spec.title, spec.overpass.endpoint="https://overpass-api.de/api/interpreter", spec.overpass.query.
-- For maplibre.style.v1, include:
-  spec.title, spec.style.sourceStyle.mode, and style JSON/url.
-- For agent.cli.v1, include:
-  spec.title, spec.agent.image, and either spec.agent.script or spec.agent.command.
-- Include spec.render.viewport.center [lon,lat] and zoom when possible.
-- Include spec.constraints.deadlineSeconds and spec.artifacts.layout.
+- Write concise Overpass QL. Do NOT repeat filter conditions.
 - Return only valid JSON.`
 }
 

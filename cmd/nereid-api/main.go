@@ -521,6 +521,7 @@ export npm_config_update_notifier=false
 export npm_config_fund=false
 export npm_config_audit=false
 export NO_UPDATE_NOTIFIER=1
+export GEMINI_CLI_TRUST_WORKSPACE=true
 GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-pro}}"
 GEMINI_TIMEOUT_SECONDS="${NEREID_GEMINI_TIMEOUT_SECONDS:-180}"
 rm -f "${OUT_TEXT_PIPE}" "${OUT_TEXT_RAW}"
@@ -541,9 +542,9 @@ tee "${OUT_TEXT_RAW}" < "${OUT_TEXT_PIPE}" | sed -u \
 TEE_PID=$!
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  timeout "${GEMINI_TIMEOUT_SECONDS}" npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+  timeout "${GEMINI_TIMEOUT_SECONDS}" npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo --skip-trust > "${OUT_TEXT_PIPE}" 2>&1
 else
-  npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+  npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo --skip-trust > "${OUT_TEXT_PIPE}" 2>&1
 fi
 status=$?
 set -e
@@ -1005,29 +1006,16 @@ func plannerSystemPrompt(allowedKinds []string) string {
 		kindsLine = "You MUST restrict spec.kind to: " + strings.Join(allowedKinds, ", ") + "."
 	}
 
-	return `You are NEREID Prompt Planner.
-Convert the user's instructions into executable NEREID Work specs.
+	return `You are NEREID Prompt Planner. Output valid JSON only. No markdown, no explanation.
 
-Output MUST be JSON only (no markdown), with this schema:
-{
-  "works": [
-    {
-      "baseName": "short-kebab-case",
-      "spec": { ... Work.spec object ... }
-    }
-  ]
-}
+Example input: "show parks in Tokyo on a map"
+Example output:
+{"works":[{"baseName":"tokyo-parks","spec":{"kind":"overpassql.map.v1","title":"Parks in Tokyo","overpass":{"endpoint":"https://overpass-api.de/api/interpreter","query":"[out:json][timeout:25];\n(way[\"leisure\"=\"park\"](35.5,139.6,35.85,139.95);\nrelation[\"leisure\"=\"park\"](35.5,139.6,35.85,139.95);\n);\nout body;\n>;\nout skel qt;"},"render":{"viewport":{"center":[139.69,35.69],"zoom":12}}}}]}
 
 Rules:
-- If the user requests multiple items (bullets/newlines), split into multiple works.
-- For most "show X on a map" requests, use kind=overpassql.map.v1 and write a valid Overpass QL query.
-- Set spec.title to a human-readable English title.
-- For overpassql.map.v1, include:
-  spec.overpass.endpoint (prefer https://overpass.yuiseki.net/api/interpreter when available; otherwise https://overpass-api.de/api/interpreter)
-  spec.overpass.query (valid Overpass QL)
-  spec.render.viewport.center [lon,lat] and zoom when you can infer it.
-- For maplibre.style.v1, include spec.style.sourceStyle.mode and (json or url).
-- For agent.cli.v1, include spec.agent.image and either spec.agent.script or spec.agent.command.
+- For "show X on a map" requests use kind=overpassql.map.v1 with a valid Overpass QL query.
+- Use leisure=park for parks, amenity=restaurant for restaurants, etc.
+- Write concise Overpass QL. Do NOT repeat filter conditions.
 - Return only valid JSON.
 
 ` + kindsLine

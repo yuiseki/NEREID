@@ -501,6 +501,7 @@ export npm_config_update_notifier=false
 export npm_config_fund=false
 export npm_config_audit=false
 export NO_UPDATE_NOTIFIER=1
+export GEMINI_CLI_TRUST_WORKSPACE=true
 GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-pro}}"
 GEMINI_TIMEOUT_SECONDS="${NEREID_GEMINI_TIMEOUT_SECONDS:-180}"
 rm -f "${OUT_TEXT_PIPE}" "${OUT_TEXT_RAW}"
