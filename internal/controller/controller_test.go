@@ -146,8 +146,8 @@ func TestValidateSucceededWorkArtifactsFailsOnRuntimeSignature(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workDir, "index.html"), []byte("<!doctype html><html><body>ok</body></html>"), 0o644); err != nil {
 		t.Fatalf("write index.html: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(workDir, "gemini-output.txt"), []byte("TypeError: Cannot read properties of undefined (reading 'lon')"), 0o644); err != nil {
-		t.Fatalf("write gemini-output.txt: %v", err)
+	if err := os.WriteFile(filepath.Join(workDir, "opencode-output.txt"), []byte("TypeError: Cannot read properties of undefined (reading 'lon')"), 0o644); err != nil {
+		t.Fatalf("write opencode-output.txt: %v", err)
 	}
 
 	c := &Controller{
@@ -259,17 +259,16 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 			for _, needle := range []string{
 				"legacy-work-spec.json",
 				"GEMINI_MD_FILE",
-				"@google/gemini-cli",
-				"GEMINI_CLI_MODEL=\"${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-pro}}\"",
-				"--model \"${GEMINI_CLI_MODEL}\"",
-				"WARNING: The following project-level hooks have been detected in this workspace:",
 				"legacy-kind-prompt.txt",
 				"KIND_SKILL_FILE=\"${OUT_DIR}/.gemini/skills/" + kindSkill + "/SKILL.md\"",
 				"TEMPLATE_ROOT=\"${NEREID_GEMINI_TEMPLATE_ROOT:-/opt/nereid/gemini-workspace}\"",
 				"Gemini workspace template missing: ${TEMPLATE_ROOT}/.gemini",
-				"Gemini workspace template missing: ${TEMPLATE_ROOT}/GEMINI.md",
 				"cp -a \"${TEMPLATE_ROOT}/.\" \"${OUT_DIR}/\"",
 				"rm -rf \"${OUT_DIR}/node_modules\" \"${OUT_DIR}/dist\"",
+				"cp -a \"${OUT_DIR}/.gemini/skills\" \"${OUT_DIR}/.opencode/\"",
+				"OPENCODE_BASE_URL=",
+				"opencode run --dangerously-skip-permissions",
+				"OPENCODE_TIMEOUT_SECONDS=",
 			} {
 				if !strings.Contains(embedded, needle) {
 					t.Fatalf("embedded script missing %q\nscript:\n%s", needle, embedded)

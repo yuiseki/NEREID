@@ -17,11 +17,12 @@ RUN apt-get update \
     python3 \
   && rm -rf /var/lib/apt/lists/*
 
-# Install CLI tools used by generated Gemini job scripts.
+# Install CLI tools used by generated job scripts.
 RUN npm install -g --omit=dev --no-audit --no-fund \
     http-server \
     @playwright/cli@latest \
-    playwright
+    playwright \
+    opencode-ai
 
 COPY agents/osmable-patches /opt/nereid/osmable-patches
 RUN git clone --depth 1 https://github.com/yuiseki/osmable /tmp/osmable \
@@ -30,7 +31,7 @@ RUN git clone --depth 1 https://github.com/yuiseki/osmable /tmp/osmable \
   && npm ci \
   && npm run build \
   && npm pack \
-  && npm install -g --omit=dev --no-audit --no-fund /tmp/osmable/osmable-*.tgz \
+  && npm install -g --omit=dev --no-audit --no-fund /tmp/osmable/osmcli-*.tgz \
   && rm -rf /tmp/osmable
 
 # Optional: preinstall Playwright Chromium at image build time.

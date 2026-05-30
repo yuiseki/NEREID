@@ -59,7 +59,7 @@ index 24fbb0f..ddb89e2 100644
 -		method: "POST",
 -		headers: {
 -			"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
--			"User-Agent": "osmable/0.1.0 (cli)",
+-			"User-Agent": "osmcli/0.1.0 (cli)",
 -		},
 -		body: new URLSearchParams({ data: query }),
 -	});
@@ -94,7 +94,7 @@ index 24fbb0f..ddb89e2 100644
 +				method: "POST",
 +				headers: {
 +					"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-+					"User-Agent": "osmable/0.1.0 (cli)",
++					"User-Agent": "osmcli/0.1.0 (cli)",
 +				},
 +				body: new URLSearchParams({ data: attemptQuery }),
 +			});

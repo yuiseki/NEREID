@@ -412,9 +412,7 @@ OUT_DIR="${NEREID_ARTIFACT_DIR:-/artifacts/${NEREID_WORK_NAME:-work}}"
 SPECIALS_DIR="${OUT_DIR}/specials"
 SPECIALS_SKILLS_DIR="${SPECIALS_DIR}/skills"
 mkdir -p "${OUT_DIR}" "${SPECIALS_SKILLS_DIR}"
-OUT_TEXT="${OUT_DIR}/gemini-output.txt"
-OUT_TEXT_RAW="${OUT_DIR}/gemini-output.raw.txt"
-OUT_TEXT_PIPE="${OUT_DIR}/gemini-output.pipe"
+OUT_TEXT="${OUT_DIR}/opencode-output.txt"
 PROMPT_FILE="${OUT_DIR}/legacy-kind-prompt.txt"
 SPEC_FILE="${OUT_DIR}/legacy-work-spec.json"
 KIND_SKILL_FILE="${OUT_DIR}/.gemini/skills/%s/SKILL.md"
@@ -441,8 +439,8 @@ cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
   <body data-nereid-bootstrap="1">
     <div class="wrap">
       <h1>Hello, world</h1>
-      <p>Gemini CLI is bridging a legacy kind specification...</p>
-      <p><a href="./agent.log">agent.log</a> / <a href="./gemini-output.raw.txt">gemini-output.raw.txt</a></p>
+      <p>opencode is bridging a legacy kind specification...</p>
+      <p><a href="./agent.log">agent.log</a> / <a href="./opencode-output.txt">opencode-output.txt</a></p>
       <pre id="out">Waiting for logs...</pre>
     </div>
     <script>
@@ -461,12 +459,6 @@ cat > "${OUT_DIR}/index.html" <<'HTMLBOOT'
 HTMLBOOT
 fi
 
-if [ -z "${GEMINI_API_KEY:-}" ]; then
-  printf '%%s\n' "GEMINI_API_KEY is required for Gemini CLI execution." > "${OUT_TEXT}"
-  cat "${OUT_TEXT}"
-  exit 2
-fi
-
 SPEC_B64=%q
 printf '%%s' "${SPEC_B64}" | base64 -d > "${SPEC_FILE}"
 
@@ -479,15 +471,9 @@ if [ ! -d "${TEMPLATE_ROOT}/.gemini" ]; then
   cat "${OUT_TEXT}"
   exit 2
 fi
-if [ ! -f "${TEMPLATE_ROOT}/GEMINI.md" ]; then
-  printf '%%s\n' "Gemini workspace template missing: ${TEMPLATE_ROOT}/GEMINI.md" > "${OUT_TEXT}"
-  cat "${OUT_TEXT}"
-  exit 2
-fi
 
 cp -a "${TEMPLATE_ROOT}/." "${OUT_DIR}/"
 rm -rf "${OUT_DIR}/node_modules" "${OUT_DIR}/dist"
-chmod +x "${OUT_DIR}/.gemini/hooks/"*.sh 2>/dev/null || true
 
 if [ ! -f "${KIND_SKILL_FILE}" ]; then
   printf '%%s\n' "Legacy kind skill missing in template: ${KIND_SKILL_FILE}" > "${OUT_TEXT}"
@@ -495,62 +481,46 @@ if [ ! -f "${KIND_SKILL_FILE}" ]; then
   exit 2
 fi
 
+mkdir -p "${OUT_DIR}/.opencode"
+cp -a "${OUT_DIR}/.gemini/skills" "${OUT_DIR}/.opencode/"
+
+OPENCODE_BASE_URL="${NEREID_OPENCODE_BASE_URL:-http://llama-server.knative-pool.svc.cluster.local:8080/v1}"
+OPENCODE_MODEL_ID="${NEREID_OPENCODE_MODEL_ID:-gvt-llm}"
+cat > "${OUT_DIR}/.opencode/opencode.json" << OPENCODECONF
+{
+  "\$schema": "https://opencode.ai/config.json",
+  "model": "nereid-local/${OPENCODE_MODEL_ID}",
+  "provider": {
+    "nereid-local": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "NEREID llama-server (k8s)",
+      "options": {"baseURL": "${OPENCODE_BASE_URL}"},
+      "models": {
+        "${OPENCODE_MODEL_ID}": {"name": "Qwen3.6-35B-A3B (k8s)", "limit": {"context": 32768, "output": 8192}}
+      }
+    }
+  }
+}
+OPENCODECONF
+
 cd "${OUT_DIR}"
 export npm_config_loglevel=error
 export npm_config_update_notifier=false
 export npm_config_fund=false
 export npm_config_audit=false
 export NO_UPDATE_NOTIFIER=1
-export GEMINI_CLI_TRUST_WORKSPACE=true
-GEMINI_CLI_MODEL="${NEREID_GEMINI_MODEL:-${GEMINI_MODEL:-gemini-2.5-pro}}"
-GEMINI_TIMEOUT_SECONDS="${NEREID_GEMINI_TIMEOUT_SECONDS:-180}"
-rm -f "${OUT_TEXT_PIPE}" "${OUT_TEXT_RAW}"
-mkfifo "${OUT_TEXT_PIPE}"
-tee "${OUT_TEXT_RAW}" < "${OUT_TEXT_PIPE}" | sed -u \
-  -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
-  -e '/^npm[[:space:]]\+notice/d' \
-  -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
-  -e '/^Skill ".*" from ".*" is overriding the built-in skill\.$/d' \
-  -e '/is overriding the built-in skill/d' \
-  -e '/^WARNING: The following project-level hooks have been detected in this workspace:/,/remove them/d' \
-  -e '/project-level hooks have been detected in this workspace/d' \
-  -e '/If you did not configure these hooks or do not trust this project/d' \
-  -e '/These hooks will be executed/d' \
-  -e '/please review the project settings (.gemini\/settings.json) and remove them/d' \
-  -e '/^Hook registry initialized with [0-9][0-9]* hook entries$/d' \
-  -e '/Hook registry initialized with [0-9][0-9]* hook entries/d' &
-TEE_PID=$!
+OPENCODE_TIMEOUT_SECONDS="${NEREID_OPENCODE_TIMEOUT_SECONDS:-300}"
 set +e
 if command -v timeout >/dev/null 2>&1; then
-  timeout "${GEMINI_TIMEOUT_SECONDS}" npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+  timeout "${OPENCODE_TIMEOUT_SECONDS}" opencode run --dangerously-skip-permissions "$(cat "${PROMPT_FILE}")" > "${OUT_TEXT}" 2>&1
 else
-  npx -y --loglevel=error --no-update-notifier --no-fund --no-audit @google/gemini-cli -- -p "$(cat "${PROMPT_FILE}")" --model "${GEMINI_CLI_MODEL}" --output-format text --approval-mode yolo > "${OUT_TEXT_PIPE}" 2>&1
+  opencode run --dangerously-skip-permissions "$(cat "${PROMPT_FILE}")" > "${OUT_TEXT}" 2>&1
 fi
 status=$?
 set -e
-wait "${TEE_PID}" || true
-rm -f "${OUT_TEXT_PIPE}"
 if [ "${status}" -eq 124 ]; then
-  printf '\nGemini CLI timed out after %%ss.\n' "${GEMINI_TIMEOUT_SECONDS}" >> "${OUT_TEXT_RAW}"
+  printf '\nopencode timed out after %%ss.\n' "${OPENCODE_TIMEOUT_SECONDS}" >> "${OUT_TEXT}"
 fi
-
-if ! sed \
-  -e '/^npm[[:space:]]\+warn[[:space:]]\+deprecated/d' \
-  -e '/^npm[[:space:]]\+notice/d' \
-  -e '/^YOLO mode is enabled\. All tool calls will be automatically approved\.$/d' \
-  -e '/^Skill ".*" from ".*" is overriding the built-in skill\.$/d' \
-  -e '/is overriding the built-in skill/d' \
-  -e '/^WARNING: The following project-level hooks have been detected in this workspace:/,/remove them/d' \
-  -e '/project-level hooks have been detected in this workspace/d' \
-  -e '/If you did not configure these hooks or do not trust this project/d' \
-  -e '/These hooks will be executed/d' \
-  -e '/please review the project settings (.gemini\/settings.json) and remove them/d' \
-  -e '/^Hook registry initialized with [0-9][0-9]* hook entries$/d' \
-  -e '/Hook registry initialized with [0-9][0-9]* hook entries/d' \
-  "${OUT_TEXT_RAW}" > "${OUT_TEXT}"; then
-  cp "${OUT_TEXT_RAW}" "${OUT_TEXT}"
-fi
-rm -f "${OUT_TEXT_RAW}"
 
 if [ ! -s "${OUT_DIR}/index.html" ]; then
 cat > "${OUT_DIR}/index.html" <<'HTML'
@@ -571,11 +541,11 @@ cat > "${OUT_DIR}/index.html" <<'HTML'
   <body>
     <div class="wrap">
       <h1>Legacy Kind Bridge Output</h1>
-      <div class="meta"><a href="./gemini-output.txt">gemini-output.txt</a> / <a href="./legacy-work-spec.json">legacy-work-spec.json</a></div>
+      <div class="meta"><a href="./opencode-output.txt">opencode-output.txt</a> / <a href="./legacy-work-spec.json">legacy-work-spec.json</a></div>
       <pre id="out">Loading...</pre>
     </div>
     <script>
-      fetch("./gemini-output.txt?ts=" + Date.now(), { cache: "no-store" })
+      fetch("./opencode-output.txt?ts=" + Date.now(), { cache: "no-store" })
         .then((r) => r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status)))
         .then((t) => { document.getElementById("out").textContent = t || "(empty)"; })
         .catch((e) => { document.getElementById("out").textContent = "load failed: " + e.message; });
@@ -614,7 +584,7 @@ Primary skill: %s
 
 Steps:
 1. Read ./legacy-work-spec.json and ./legacy-kind-prompt.txt.
-2. Activate relevant workspace skills from ./.gemini/skills/, especially %s.
+2. Activate relevant workspace skills from ./.opencode/skills/, especially %s.
 3. Reproduce the legacy kind behavior by editing src/App.tsx and related files.
 4. Run make build to produce ./index.html.
 5. If an external toolchain is unavailable, show concise fallback status in-page and still finish with usable artifacts.
@@ -866,7 +836,7 @@ func (c *Controller) validateSucceededWorkArtifacts(workName string) (string, er
 	// Detect known runtime fault signatures from agent output files.
 	logPaths := []string{
 		filepath.Join(workDir, "agent.log"),
-		filepath.Join(workDir, "gemini-output.txt"),
+		filepath.Join(workDir, "opencode-output.txt"),
 		filepath.Join(workDir, "dialogue.txt"),
 		filepath.Join(workDir, "logs", "agent.log"),
 		filepath.Join(workDir, "logs", "dialogue.txt"),
