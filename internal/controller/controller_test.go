@@ -280,8 +280,8 @@ func TestBuildJobLegacyKindsBridgeToGeminiAgent(t *testing.T) {
 			if !strings.Contains(prompt, "Primary skill: "+kindSkill) {
 				t.Fatalf("prompt missing primary skill hint %q\nprompt:\n%s", kindSkill, prompt)
 			}
-			if !strings.Contains(prompt, kindSkill+"/SKILL.md") {
-				t.Fatalf("prompt missing skill SKILL.md reference %q\nprompt:\n%s", kindSkill, prompt)
+			if !strings.Contains(prompt, "especially "+kindSkill) {
+				t.Fatalf("prompt missing skill activation hint %q\nprompt:\n%s", kindSkill, prompt)
 			}
 			if !strings.Contains(prompt, "make fast-build") {
 				t.Fatalf("prompt missing make fast-build reference\nprompt:\n%s", prompt)
