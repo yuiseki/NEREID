@@ -14,6 +14,7 @@ spec:
     - duckdb.map.v1
     - gdal.rastertile.v1
     - laz.3dtiles.v1
+    - valhalla.route.v1
     - agent.cli.v1
   kueue:
     localQueueName: {{ .Values.kueue.localQueueName | quote }}
