@@ -54,6 +54,10 @@ spec:
             - name: NEREID_GEMINI_API_KEY
               value: {{ .Values.api.geminiApiKey | quote }}
             {{- end }}
+            {{- if .Values.api.llmApiKey }}
+            - name: NEREID_LLM_API_KEY
+              value: {{ .Values.api.llmApiKey | quote }}
+            {{- end }}
           ports:
             - containerPort: 8080
           volumeMounts:

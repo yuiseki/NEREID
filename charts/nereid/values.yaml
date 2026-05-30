@@ -48,6 +48,9 @@ api:
   # Prefer secret management in production.
   openaiApiKey: ""
   geminiApiKey: ""
+  # Optional: explicit API key for custom/local LLM endpoints (NEREID_LLM_BASE_URL).
+  # Leave empty to use no Authorization header (llama.cpp server ignores it).
+  llmApiKey: ""
 
 grants:
   default:

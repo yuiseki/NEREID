@@ -300,6 +300,7 @@ const (
 
 	plannerProviderOpenAI = "openai"
 	plannerProviderGemini = "gemini"
+	plannerProviderLocal  = "local"
 )
 
 type plannerCredentials struct {
@@ -401,6 +402,9 @@ func plannerAPIKey() string {
 }
 
 func plannerCredentialsFromEnv() plannerCredentials {
+	if v := strings.TrimSpace(os.Getenv("NEREID_LLM_API_KEY")); v != "" {
+		return plannerCredentials{key: v, provider: plannerProviderLocal}
+	}
 	if v := strings.TrimSpace(os.Getenv("NEREID_OPENAI_API_KEY")); v != "" {
 		return plannerCredentials{key: v, provider: plannerProviderOpenAI}
 	}
@@ -412,6 +416,9 @@ func plannerCredentialsFromEnv() plannerCredentials {
 	}
 	if v := strings.TrimSpace(os.Getenv("GEMINI_API_KEY")); v != "" {
 		return plannerCredentials{key: v, provider: plannerProviderGemini}
+	}
+	if strings.TrimSpace(os.Getenv("NEREID_LLM_BASE_URL")) != "" {
+		return plannerCredentials{key: "", provider: plannerProviderLocal}
 	}
 	return plannerCredentials{}
 }
@@ -450,8 +457,8 @@ func plannerModel() string {
 
 func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, error) {
 	key := plannerAPIKey()
-	if key == "" {
-		return nil, errors.New("llm planner requires NEREID_OPENAI_API_KEY/OPENAI_API_KEY or NEREID_GEMINI_API_KEY/GEMINI_API_KEY")
+	if key == "" && strings.TrimSpace(os.Getenv("NEREID_LLM_BASE_URL")) == "" {
+		return nil, errors.New("llm planner requires NEREID_OPENAI_API_KEY/OPENAI_API_KEY, NEREID_GEMINI_API_KEY/GEMINI_API_KEY, or NEREID_LLM_BASE_URL for local LLM")
 	}
 
 	reqBody := map[string]interface{}{
@@ -479,7 +486,9 @@ func planWorksWithLLM(ctx context.Context, text string) ([]instructionWorkPlan, 
 	if err != nil {
 		return nil, fmt.Errorf("create planner request: %w", err)
 	}
-	httpReq.Header.Set("Authorization", "Bearer "+key)
+	if key != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+key)
+	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	client := &http.Client{Timeout: 90 * time.Second}
