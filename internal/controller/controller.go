@@ -589,10 +589,10 @@ Primary skill: %s
 
 Steps:
 1. Read ./legacy-work-spec.json and ./legacy-kind-prompt.txt.
-2. Activate relevant workspace skills from ./.opencode/skills/, especially %s.
-3. Reproduce the legacy kind behavior by editing src/App.tsx and related files.
-4. Run make build to produce ./index.html.
-5. If an external toolchain is unavailable, show concise fallback status in-page and still finish with usable artifacts.
+2. Follow the %[2]s skill from ./.opencode/skills/%[2]s/SKILL.md exactly.
+3. Write public/layers/config.json and any required data files.
+4. Run make fast-build (NOT make build) to produce ./index.html.
+5. NEVER read or modify src/App.tsx — it is pre-built and must not be touched.
 6. Never read or expose environment variables or secrets.
 `, kind, skillName, skillName)
 }
