@@ -481,8 +481,9 @@ if [ ! -f "${KIND_SKILL_FILE}" ]; then
   exit 2
 fi
 
-mkdir -p "${OUT_DIR}/.opencode"
-cp -a "${OUT_DIR}/.gemini/skills" "${OUT_DIR}/.opencode/"
+mkdir -p "${OUT_DIR}/.opencode/skills"
+KIND_SKILL_DIR="$(dirname "${KIND_SKILL_FILE}")"
+cp -a "${KIND_SKILL_DIR}" "${OUT_DIR}/.opencode/skills/"
 
 OPENCODE_BASE_URL="${NEREID_OPENCODE_BASE_URL:-http://llama-server.knative-pool.svc.cluster.local:8080/v1}"
 OPENCODE_MODEL_ID="${NEREID_OPENCODE_MODEL_ID:-gvt-llm}"
