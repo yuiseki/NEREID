@@ -40,6 +40,7 @@ spec:
                     - duckdb.map.v1
                     - gdal.rastertile.v1
                     - laz.3dtiles.v1
+                    - valhalla.route.v1
                     - agent.cli.v1
                 title:
                   type: string
@@ -58,6 +59,17 @@ spec:
                       type: array
                       items:
                         type: string
+                routing:
+                  type: object
+                  required: ["from", "to"]
+                  properties:
+                    from:
+                      type: string
+                    to:
+                      type: string
+                    costing:
+                      type: string
+                      enum: ["pedestrian", "auto", "bicycle"]
                 overpass:
                   type: object
                   required: ["endpoint", "query"]

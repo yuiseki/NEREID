@@ -1359,6 +1359,16 @@ func validatePlannedSpec(spec map[string]interface{}) error {
 			return fmt.Errorf(`unsupported spec.style.sourceStyle.mode=%q`, mode)
 		}
 	case "duckdb.map.v1", "gdal.rastertile.v1", "laz.3dtiles.v1":
+	case "valhalla.route.v1":
+		routing, _ := spec["routing"].(map[string]interface{})
+		if routing == nil {
+			return errors.New(`spec.routing is required for valhalla.route.v1`)
+		}
+		from, _ := routing["from"].(string)
+		to, _ := routing["to"].(string)
+		if strings.TrimSpace(from) == "" || strings.TrimSpace(to) == "" {
+			return errors.New(`spec.routing.from and spec.routing.to are required`)
+		}
 	case "agent.cli.v1":
 		agent, _ := spec["agent"].(map[string]interface{})
 		if agent == nil {
@@ -1587,8 +1597,68 @@ out skel qt;`,
 				"artifacts":   map[string]interface{}{"layout": "style"},
 			},
 		}, nil
+
+	// Valhalla routing patterns
+	case containsAny(normalized, "から", "まで") && containsAny(normalized, "ルート", "経路", "道順") ||
+		containsAny(normalized, "から", "まで") && containsAny(normalized, "歩く", "歩いて", "走る", "自転車", "車で", "行き方"):
+		// Extract from/to from the instruction text using heuristics
+		// The agent will use Nominatim to resolve coordinates
+		from, to, costing := extractRoutingParams(normalized)
+		return instructionWorkPlan{
+			baseName: "route",
+			spec: map[string]interface{}{
+				"kind":  "valhalla.route.v1",
+				"title": fmt.Sprintf("%s から %s への%sルート", from, to, costingLabel(costing)),
+				"routing": map[string]interface{}{
+					"from":    from,
+					"to":      to,
+					"costing": costing,
+				},
+				"constraints": map[string]interface{}{"deadlineSeconds": int64(300)},
+				"artifacts":   map[string]interface{}{"layout": "map"},
+			},
+		}, nil
 	}
 	return instructionWorkPlan{}, fmt.Errorf("unsupported instruction line: %q", line)
+}
+
+func extractRoutingParams(text string) (from, to, costing string) {
+	costing = "pedestrian"
+	if containsAny(text, "車で", "自動車", "ドライブ") {
+		costing = "auto"
+	} else if containsAny(text, "自転車", "サイクル") {
+		costing = "bicycle"
+	}
+	// Simple extraction: find text before "から" and between "まで"
+	parts := strings.SplitN(text, "から", 2)
+	if len(parts) == 2 {
+		from = strings.TrimSpace(parts[0])
+		// Remove leading/trailing particles
+		from = strings.TrimPrefix(from, "。")
+		rest := parts[1]
+		toparts := strings.SplitN(rest, "まで", 2)
+		if len(toparts) == 2 {
+			to = strings.TrimSpace(toparts[0])
+		}
+	}
+	if from == "" {
+		from = "出発地"
+	}
+	if to == "" {
+		to = "目的地"
+	}
+	return
+}
+
+func costingLabel(costing string) string {
+	switch costing {
+	case "auto":
+		return "車"
+	case "bicycle":
+		return "自転車"
+	default:
+		return "徒歩"
+	}
 }
 
 func buildOverpassSpec(title, query string, centerLon, centerLat, zoom float64) map[string]interface{} {

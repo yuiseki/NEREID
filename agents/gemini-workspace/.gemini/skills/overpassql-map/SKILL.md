@@ -82,6 +82,33 @@ out geom;
 osmcli poi fetch --tag amenity=cafe --within "東京都台東区" --format geojson > public/layers/cafe-taito.geojson
 ```
 
+**osmcli 失敗時 — Nominatim で osm_id を取得して Overpass クエリを確実化:**
+```bash
+# 1. Nominatim で区の osm_id を取得（name:en に依存せず確実）
+NOM=$(curl -s "https://nominatim.yuiseki.net/search.php?q=東京都台東区&format=json&limit=1")
+OSM_ID=$(echo "$NOM" | python3 -c "import json,sys; d=json.load(sys.stdin); print(d[0]['osm_id'])")
+AREA_ID=$((3600000000 + OSM_ID))
+echo "台東区 area_id: $AREA_ID"
+
+# 2. Overpass クエリで area(AREA_ID) を使用（name:en 不要）
+QUERY="[out:json][timeout:30000];area($AREA_ID);(nwr[\"amenity\"=\"cafe\"](area););out geom;"
+curl -s "https://overpass.yuiseki.net/api/interpreter?data=$(python3 -c \"import urllib.parse,sys; print(urllib.parse.quote(sys.argv[1]))\" \"$QUERY\")" -o /tmp/overpass_raw.json
+python3 -c "
+import json
+data = json.load(open('/tmp/overpass_raw.json'))
+features = []
+for el in data.get('elements', []):
+    props = el.get('tags', {}); props['osm_id'] = el.get('id')
+    if el['type'] == 'node':
+        features.append({'type':'Feature','geometry':{'type':'Point','coordinates':[el['lon'],el['lat']]},'properties':props})
+    elif el['type'] in ['way','relation'] and 'geometry' in el:
+        coords = [[p['lon'],p['lat']] for p in el['geometry']]
+        geom = {'type':'Polygon','coordinates':[coords]} if len(coords)>=3 and coords[0]==coords[-1] else {'type':'LineString','coordinates':coords}
+        features.append({'type':'Feature','geometry':geom,'properties':props})
+print(json.dumps({'type':'FeatureCollection','features':features},ensure_ascii=False))
+" > public/layers/cafe-taito.geojson
+```
+
 **curl + Overpass API（osmcliが使えない/0件の場合）:**
 ```bash
 QUERY='[out:json][timeout:30000];area["name:en"="Tokyo"]->.outer;area["name:en"="Taito"]->.inner;(nwr["amenity"="cafe"](area.inner)(area.outer););out geom;'
