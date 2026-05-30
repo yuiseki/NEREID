@@ -26,7 +26,7 @@ ColorForConcern: <施設種別>, <Web Safe Color名>
 ShowPopupOnClick: true/false
 ```
 
-- エリアは英語表記に変換（台東区→Taito, 文京区→Bunkyō, 渋谷区→Shibuya, 千代田区→Chiyoda, 港区→Minato, 墨田区→Sumida, 江東区→Kōtō, 新宿区→Shinjuku, 中央区→Chūō）
+- エリアは英語表記に変換（台東区→Taito, 文京区→Bunkyo, 渋谷区→Shibuya, 千代田区→Chiyoda, 港区→Minato, 墨田区→Sumida, 江東区→Koto, 新宿区→Shinjuku, 中央区→Chuo）
 - 病院を求められたら医院(Doctors)も必ず追加
 - OSMに存在しないデータは `No map specified.` を出力して停止
 
@@ -34,8 +34,10 @@ ShowPopupOnClick: true/false
 
 - timeout は必ず 30000
 - 出力は必ず `out geom;`
-- 東京の区には `area["name:en"="Tokyo"]->.outer; area["name:en"="Taito"]->.inner;` のようにネスト検索
+- 東京の区には `area["name:en"="Tokyo"]->.outer;` でスコープを絞ってネスト検索
+- 区の英語表記: 台東区=Taito, 文京区=Bunkyo, 渋谷区=Shibuya, 千代田区=Chiyoda, 港区=Minato, 墨田区=Sumida, 江東区=Koto, 新宿区=Shinjuku, 中央区=Chuo（**長音符なし**で OSM に一致）
 
+**単一エリア:**
 ```
 [out:json][timeout:30000];
 area["name:en"="Tokyo"]->.outer;
@@ -45,6 +47,33 @@ area["name:en"="Taito"]->.inner;
 );
 out geom;
 ```
+
+**複数エリア（union パターン）— エリアごとに `.a1`, `.a2` とバインドしてまとめる:**
+```
+[out:json][timeout:30000];
+area["name:en"="Tokyo"]->.outer;
+area["name:en"="Taito"]->.a1;
+area["name:en"="Bunkyo"]->.a2;
+(
+  nwr["amenity"="hospital"](area.a1)(area.outer);
+  nwr["amenity"="hospital"](area.a2)(area.outer);
+);
+out geom;
+```
+→ **クエリとファイルはタグ単位で分ける**（hospital 用1本 + doctors 用1本 = 2クエリ、出力は hospital-taito/hospital-bunkyo/doctors-taito/doctors-bunkyo の4ファイル）:
+```
+# doctors 用クエリ（hospital クエリと同パターンで amenity を変えるだけ）
+[out:json][timeout:30000];
+area["name:en"="Tokyo"]->.outer;
+area["name:en"="Taito"]->.a1;
+area["name:en"="Bunkyo"]->.a2;
+(
+  nwr["amenity"="doctors"](area.a1)(area.outer);
+  nwr["amenity"="doctors"](area.a2)(area.outer);
+);
+out geom;
+```
+→ 1クエリの結果を Python で `properties.amenity` によりエリア別にファイルに書き分けても可
 
 ### STEP 3: データ取得
 
@@ -79,15 +108,40 @@ print(json.dumps({'type':'FeatureCollection','features':features},ensure_ascii=F
 python3 -c "import json; d=json.load(open('public/layers/cafe-taito.geojson')); print(f'Features: {len(d[\"features\"])}')"
 ```
 
+**区境界ポリゴン取得（area-*.geojson）:**
+```bash
+# osmcli で区境界を取得
+osmcli poi fetch --tag boundary=administrative --within "東京都台東区" --format geojson > public/layers/area-taito.geojson
+# 0件またはエラーの場合は Overpass で relation を取得
+QUERY='[out:json][timeout:30000];relation["boundary"="administrative"]["admin_level"="7"]["name"="台東区"];out geom;'
+curl -s --data-urlencode "data=${QUERY}" https://overpass.yuiseki.net/api/interpreter -o /tmp/area_raw.json
+python3 -c "
+import json
+data = json.load(open('/tmp/area_raw.json'))
+features = []
+for el in data.get('elements', []):
+    props = {'name': el.get('tags', {}).get('name', ''), 'osm_id': el.get('id')}
+    if el.get('type') in ['way','relation'] and 'geometry' in el:
+        coords = [[p['lon'],p['lat']] for p in el['geometry']]
+        geom = {'type':'Polygon','coordinates':[coords]} if len(coords)>=3 and coords[0]==coords[-1] else {'type':'LineString','coordinates':coords}
+        features.append({'type':'Feature','geometry':geom,'properties':props})
+print(json.dumps({'type':'FeatureCollection','features':features},ensure_ascii=False))
+" > public/layers/area-taito.geojson
+```
+
 ### STEP 4: config.json 更新
 
 `public/layers/config.json` を以下フォーマットで書き込む（App.tsx は変更不要）:
+
+**`showPopupOnClick`**: 施設名・住所などの詳細を確認したい POI（病院・店舗・駅）は `true`、エリア境界のみで詳細不要なら `false`。
+
+**複数エリアの initialView**: 各エリアの代表座標を平均し、ズームは 12〜13 を使用（単一エリアは 14）:
 
 ```json
 {
   "title": "台東区のカフェ",
   "initialView": {"longitude": 139.7850, "latitude": 35.7126, "zoom": 14},
-  "showPopupOnClick": false,
+  "showPopupOnClick": true,
   "layers": [
     {
       "id": "area-taito", "name": "台東区",

@@ -4,10 +4,32 @@
 
 ## 重要: 環境制約
 
-### ネットワーク
-- **Overpass API**: `https://overpass.yuiseki.net/api/interpreter` のみ使用可能
-  - `overpass-api.de`, `overpass.kumi.systems`, `overpass.openstreetmap.ru` は到達不可
-  - 必ず `overpass.yuiseki.net` を使用すること
+### 利用可能なネットワークサービス
+
+| サービス | URL | 用途 |
+|---------|-----|------|
+| Overpass API | `https://overpass.yuiseki.net/api/interpreter` | OSM データ取得 |
+| Nominatim | `https://nominatim.yuiseki.net/search.php?q=<地名>&format=json` | ジオコーディング（地名→座標） |
+| Valhalla | `https://valhalla.yuiseki.net/route` | ルーティング（POST, JSON） |
+| 静的ファイル | `https://z.yuiseki.net/static/geojson/` | 既製 GeoJSON データ |
+| マップタイル | `https://tile.yuiseki.net/` | ベクタータイルスタイル |
+
+**Overpass**: `overpass-api.de`, `overpass.kumi.systems`, `overpass.openstreetmap.ru` は到達不可
+
+**静的 GeoJSON ファイル一覧** (`https://z.yuiseki.net/static/geojson/`):
+- `usgs_m45_month.geojson` — 最新30日のM4.5以上地震データ（USGS）
+- `conflicts.json` — 世界の武力紛争データ
+- `tectonicplates_GeoJSON_PB2002_boundaries.json` — プレートテクトニクス境界線
+- `cable-geo.json` — 海底ケーブル
+
+**Valhalla ルーティング例**:
+```bash
+curl -s https://valhalla.yuiseki.net/route \
+  -H "Content-Type: application/json" \
+  -d '{"locations":[{"lat":35.6812,"lon":139.7671},{"lat":35.7100,"lon":139.8107}],
+       "costing":"pedestrian","units":"meters"}'
+```
+コスティング: `auto`（車）、`pedestrian`（徒歩）、`bicycle`（自転車）
 
 ### コマンド
 - Overpassデータ取得: **`osmcli`**（`osmable` コマンドは存在しない）
