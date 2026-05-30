@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -764,11 +765,15 @@ func shellSplit(s string) []string {
 	return out
 }
 
+var reThinkBlock = regexp.MustCompile(`(?s)<think>.*?</think>`)
+
 func extractJSONText(s string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
+	// Strip chain-of-thought blocks emitted by reasoning models (e.g. Qwen3.5).
+	s = strings.TrimSpace(reThinkBlock.ReplaceAllString(s, ""))
 	if strings.HasPrefix(s, "```") {
 		s = strings.TrimPrefix(s, "```json")
 		s = strings.TrimPrefix(s, "```JSON")
