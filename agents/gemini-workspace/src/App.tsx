@@ -20,6 +20,7 @@ import { Protocol as PMTilesProtocol } from "pmtiles";
 import * as turf from "@turf/turf";
 import "maplibre-gl/dist/maplibre-gl.css";
 import type { MapLayerMouseEvent } from "react-map-gl/maplibre";
+import type { StyleSpecification } from "maplibre-gl";
 import type { FeatureCollection, Feature, GeoJsonProperties, Point } from "geojson";
 
 // ============================================================
@@ -45,6 +46,7 @@ interface MapConfig {
     };
     showPopupOnClick: boolean;
     layers: LayerConfig[];
+    mapStyle?: string | StyleSpecification;
 }
 
 interface LoadedLayer {
@@ -301,7 +303,7 @@ function App() {
             mapLib={maplibregl}
             initialViewState={config.initialView}
             style={{ width: "100%", height: "100vh" }}
-            mapStyle={mapStyles[mapStyle]}
+            mapStyle={config.mapStyle ?? mapStyles[mapStyle]}
             hash={true}
             interactiveLayerIds={interactiveLayerIds}
             onClick={handleClick}
