@@ -1206,6 +1206,27 @@ out skel qt;`,
 				OutlineColor: "#0d47a1",
 				ShowMarker:   false,
 			}}, 0, 20, 1.7), nil
+
+	// foil4g PMTiles datasets (Source Cooperative)
+	case containsAny(normalized, "人口密度", "人口分布", "kontur") &&
+		!containsAny(normalized, "一番高い", "最も高い", "国"):
+		return foil4gPMTilesPlan("kontur-population", "Kontur 世界人口密度 (H3 Hex)",
+			"https://data.source.coop/smartmaps/foil4gr1/kpop.pmtiles",
+			buildKonturPopulationStyle()), nil
+	case containsAny(normalized, "建物", "building", "フットプリント") &&
+		containsAny(normalized, "google", "グーグル", "世界", "global"):
+		return foil4gPMTilesPlan("google-open-buildings", "Google Open Buildings",
+			"https://data.source.coop/cholmes/google-open-buildings/google-open-buildings.pmtiles",
+			buildGoogleOpenBuildingsStyle()), nil
+	case containsAny(normalized, "携帯", "基地局", "セル", "opencellid"):
+		return foil4gPMTilesPlan("opencellid", "OpenCelliD 携帯基地局",
+			"https://data.source.coop/smartmaps/opencellid/cellid.pmtiles",
+			buildOpenCellIdStyle()), nil
+	case containsAny(normalized, "overture", "オーバーチャー") &&
+		containsAny(normalized, "建物", "building", "POI", "表示", "マップ"):
+		return foil4gPMTilesPlan("overture-maps", "Overture Maps",
+			"https://z.yuiseki.net/static/overture/overture.pmtiles",
+			buildOvertureMapsStyle()), nil
 	}
 
 	return instructionWorkPlan{}, fmt.Errorf("unsupported instruction line: %q", line)
@@ -1219,6 +1240,104 @@ type staticFileSpec struct {
 	Color        string
 	OutlineColor string
 	ShowMarker   bool
+}
+
+func foil4gPMTilesPlan(baseName, title, pmtilesURL string, styleJSON string) instructionWorkPlan {
+	return instructionWorkPlan{
+		baseName: baseName + "-map",
+		spec: map[string]interface{}{
+			"kind":  "maplibre.style.v1",
+			"title": title,
+			"style": map[string]interface{}{
+				"sourceStyle": map[string]interface{}{
+					"mode": "inline",
+					"json": styleJSON,
+				},
+				"validate": false,
+			},
+			"render":      map[string]interface{}{"viewport": map[string]interface{}{"center": []float64{0, 20}, "zoom": 2.0}},
+			"constraints": map[string]interface{}{"deadlineSeconds": int64(300)},
+			"artifacts":   map[string]interface{}{"layout": "style"},
+		},
+	}
+}
+
+func buildKonturPopulationStyle() string {
+	return `{
+  "version": 8,
+  "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
+  "sources": {
+    "base": { "type": "vector", "url": "https://demotiles.maplibre.org/tiles/tiles.json" },
+    "kpop": { "type": "vector", "url": "pmtiles://https://data.source.coop/smartmaps/foil4gr1/kpop.pmtiles", "attribution": "Kontur Population" }
+  },
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#1a1a2e" } },
+    { "id": "countries-fill", "type": "fill", "source": "base", "source-layer": "countries", "paint": { "fill-color": "#16213e", "fill-opacity": 0.8 } },
+    { "id": "countries-line", "type": "line", "source": "base", "source-layer": "countries", "paint": { "line-color": "#0f3460", "line-width": 0.5 } },
+    {
+      "id": "kpop-fill", "type": "fill", "source": "kpop", "source-layer": "kpop",
+      "paint": {
+        "fill-color": ["interpolate", ["linear"], ["number", ["get", "pop"], 0],
+          0, "rgba(0,0,128,0)", 100, "rgba(0,100,255,0.4)", 1000, "rgba(0,255,200,0.6)",
+          10000, "rgba(255,200,0,0.7)", 100000, "rgba(255,50,0,0.85)"],
+        "fill-opacity": 0.85
+      }
+    },
+    { "id": "countries-label", "type": "symbol", "source": "base", "source-layer": "centroids",
+      "layout": { "text-field": ["coalesce", ["get", "name_en"], ["get", "name"]], "text-size": 10 },
+      "paint": { "text-color": "#cccccc", "text-halo-color": "#000000", "text-halo-width": 1 } }
+  ]
+}`
+}
+
+func buildGoogleOpenBuildingsStyle() string {
+	return `{
+  "version": 8,
+  "sources": {
+    "base": { "type": "vector", "url": "https://demotiles.maplibre.org/tiles/tiles.json" },
+    "gob": { "type": "vector", "url": "pmtiles://https://data.source.coop/cholmes/google-open-buildings/google-open-buildings.pmtiles", "attribution": "Google Open Buildings" }
+  },
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#f5f5f5" } },
+    { "id": "countries-fill", "type": "fill", "source": "base", "source-layer": "countries", "paint": { "fill-color": "#e8e8e8" } },
+    { "id": "countries-line", "type": "line", "source": "base", "source-layer": "countries", "paint": { "line-color": "#aaaaaa", "line-width": 0.5 } },
+    { "id": "buildings-fill", "type": "fill", "source": "gob", "source-layer": "buildings",
+      "paint": { "fill-color": "rgba(117,169,160,0.8)", "fill-outline-color": "rgba(80,130,120,0.9)" } }
+  ]
+}`
+}
+
+func buildOpenCellIdStyle() string {
+	return `{
+  "version": 8,
+  "sources": {
+    "base": { "type": "vector", "url": "https://demotiles.maplibre.org/tiles/tiles.json" },
+    "cells": { "type": "vector", "url": "pmtiles://https://data.source.coop/smartmaps/opencellid/cellid.pmtiles", "attribution": "OpenCelliD" }
+  },
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#0d1117" } },
+    { "id": "countries-fill", "type": "fill", "source": "base", "source-layer": "countries", "paint": { "fill-color": "#161b22", "fill-opacity": 0.9 } },
+    { "id": "countries-line", "type": "line", "source": "base", "source-layer": "countries", "paint": { "line-color": "#30363d", "line-width": 0.5 } },
+    { "id": "cells-circle", "type": "circle", "source": "cells", "source-layer": "a",
+      "paint": { "circle-radius": 3, "circle-color": "rgba(141,211,199,0.7)", "circle-blur": 0.5 } }
+  ]
+}`
+}
+
+func buildOvertureMapsStyle() string {
+	return `{
+  "version": 8,
+  "sources": {
+    "overture": { "type": "vector", "url": "pmtiles://https://z.yuiseki.net/static/overture/overture.pmtiles", "attribution": "Overture Maps Foundation" }
+  },
+  "layers": [
+    { "id": "background", "type": "background", "paint": { "background-color": "#f8f4f0" } },
+    { "id": "building-fill", "type": "fill", "source": "overture", "source-layer": "building",
+      "paint": { "fill-color": "rgba(141,211,199,0.8)", "fill-outline-color": "rgba(100,170,160,1)" } },
+    { "id": "transportation-line", "type": "line", "source": "overture", "source-layer": "transportation",
+      "paint": { "line-color": "rgba(255,255,179,0.8)", "line-width": 1 } }
+  ]
+}`
 }
 
 func tileYuisekiNetPlan(styleName, title string, lon, lat, zoom float64) instructionWorkPlan {

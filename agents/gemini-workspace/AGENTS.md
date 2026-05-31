@@ -18,11 +18,35 @@
 
 **Overpass**: `overpass-api.de`, `overpass.kumi.systems`, `overpass.openstreetmap.ru` は到達不可
 
-**静的 GeoJSON ファイル一覧** (`https://z.yuiseki.net/static/geojson/`):
-- `usgs_m45_month.geojson` — 最新30日のM4.5以上地震データ（USGS）
-- `conflicts.json` — 世界の武力紛争データ
-- `tectonicplates_GeoJSON_PB2002_boundaries.json` — プレートテクトニクス境界線
-- `cable-geo.json` — 海底ケーブル
+**静的ファイル一覧** (`https://z.yuiseki.net/static/`):
+
+| パス | 内容 | 形式 |
+|-----|------|------|
+| `geojson/usgs_m45_month.geojson` | 最新30日 M4.5以上地震 (USGS) | GeoJSON Point |
+| `geojson/conflicts.json` | 世界の武力紛争 | GeoJSON |
+| `geojson/tectonicplates_GeoJSON_PB2002_boundaries.json` | プレートテクトニクス境界線 | GeoJSON LineString |
+| `geojson/cable-geo.json` | 海底ケーブル | GeoJSON LineString |
+| `ucdp/GEDEvent_v25_1.csv` | UCDP 紛争イベント 463k件 (1989-2024) | CSV |
+| `overture/overture.pmtiles` | Overture Maps (建物・道路・POI) 56GB | **PMTiles** |
+
+**PMTiles データ** (`pmtiles://` プロトコルで MapLibre から直接参照):
+
+| データセット | PMTiles URL | source-layer | 内容 |
+|------------|-------------|-------------|------|
+| Kontur 人口密度 | `pmtiles://https://data.source.coop/smartmaps/foil4gr1/kpop.pmtiles` | `kpop` | 400m H3 hexの人口 |
+| Google Open Buildings | `pmtiles://https://data.source.coop/cholmes/google-open-buildings/google-open-buildings.pmtiles` | `buildings` | 全世界建物フットプリント |
+| OpenCelliD | `pmtiles://https://data.source.coop/smartmaps/opencellid/cellid.pmtiles` | `a` | 携帯基地局位置 |
+| Overture Maps | `pmtiles://https://z.yuiseki.net/static/overture/overture.pmtiles` | `building`, `transportation` | 建物・道路・POI |
+| UCDP 武力紛争 | `pmtiles://https://data.source.coop/smartmaps/uppsala-conflict/a.pmtiles` | `event` | 武力衝突イベント |
+
+**Overture STAC** (GeoParquet → DuckDB で spatial query 可能):
+- カタログ: `https://stac.overturemaps.org/2026-05-20.0/`
+- テーマ: `buildings/building`, `places/place`, `divisions/division_area`, `transportation/segment`
+- k8s service: `http://buildings-cng.yuiseki.com/tiles/{z}/{x}/{y}.mvt` — Overture buildings MVT
+
+**HOTOSM 衛星画像 STAC**:
+- 検索 API: `POST https://api.imagery.hotosm.org/stac/search` — bbox で衛星画像 COG を検索
+- k8s service: `http://hotosm-imagery-tile.yuiseki.com/tiles/{z}/{x}/{y}.png` — 衛星画像タイル
 
 **Valhalla ルーティング例**:
 ```bash
